@@ -2,9 +2,7 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from lib.Imp_Capas import ProbarGDAL_OGR, leerCapaVectorial
-from lib.Exp_Capas import escribirCapaVectorial
-
+from lib.Vector_conex import FuenteDatosVector
 # ProbarGDAL_OGR()
 url=[
     "http://geostematicos-sigc.juntadeandalucia.es/geoserver/tematicos/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=tematicos:Provincias&maxFeatures=50&outputFormat=application/json",
@@ -75,29 +73,31 @@ url=[
     
 ]
 
-fuenteDatos = url[6]
+fuenteDatos = url[1]
 
 # Comienzo proceso Lectura - Cosas - Exportar
-capa = None
-EPSG_Entrada = 3857
-inDataSource= leerCapaVectorial(fuenteDatos, capa, EPSG_Entrada, AllLayers=True)
+# FuenteDatosVector.probar_gdal_ogr()
 
-capa = inDataSource.GetLayerByIndex(0).GetName()   
-lyr = inDataSource.GetLayer(capa)
-for feat in lyr:
-    print(feat.ExportToJson()[0:50])
+fuenteDatosObj = FuenteDatosVector(fuenteDatos)
+fuenteDatos = fuenteDatosObj.leer()
 
+capa = fuenteDatos.GetLayerByIndex(0).GetName()   
+lyr = fuenteDatos.GetLayer(capa)
+print("Número de objetos geográficos:", lyr.GetFeatureCount())
 
-EPSG_Salida = 3857
-out_format = 'ESRI Shapefile'
-outDataSource= escribirCapaVectorial(inDataSource, EPSG_Salida,out_format)
+lyr.ResetReading()
+if lyr is None:
+    print("No se encontró la capa con ese nombre.")
 
-print(outDataSource)
-
-# capa = outDataSource.GetLayerByIndex(0).GetName()   
-# lyr = outDataSource.GetLayer(capa)
-# print(lyr.ExportToJson())
+# lyr.ResetReading()
 # for feat in lyr:
 #     print(feat.ExportToJson()[0:50])
+
+print()
+
+EPSG_Salida = 3857
+out_format = 'application/json'
+outDataSource = fuenteDatosObj.exportar(EPSG_Salida=EPSG_Salida, outputFormat=out_format)
+print(outDataSource)
 
 
