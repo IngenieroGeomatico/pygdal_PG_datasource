@@ -13,6 +13,22 @@ except:
     sys.exit('ERROR: cannot find GDAL/OGR modules')
     
 class FuenteDatosRaster:
+    """
+    Clase para gestionar la lectura, consulta y exportación de datos ráster usando GDAL.
+
+    Métodos principales:
+    --------------------
+    - probar_gdal_ogr(): Comprueba la instalación y muestra los drivers disponibles de GDAL/OGR.
+    - leer(): Lee una fuente de datos ráster desde archivo, URL, etc.
+    - exportar(): Exporta el ráster a diferentes formatos (GTiff, JPEG, etc).
+
+    Atributos:
+    ----------
+    dato : str
+        Ruta o URL de la fuente de datos ráster.
+    datasource : gdal.Dataset
+        Objeto dataset de GDAL tras la lectura.
+    """
 
     @staticmethod
     def probar_gdal_ogr():
@@ -90,12 +106,34 @@ class FuenteDatosRaster:
         gdal.PopErrorHandler()
         gdal.DontUseExceptions()
 
-
     def __init__(self, dato):
+        """
+        Inicializa la clase con la ruta o URL de la fuente de datos ráster.
+
+        Parámetros
+        ----------
+        dato : str
+            Ruta o URL de la fuente de datos ráster.
+        """
         self.dato = dato
         self.datasource = None
 
     def leer(self, banda = None, EPSG_Entrada = None):
+        """
+        Lee la fuente de datos ráster y la carga en memoria.
+
+        Parámetros
+        ----------
+        banda : int, opcional
+            Número de banda a leer (por defecto, todas).
+        EPSG_Entrada : int o str, opcional
+            Código EPSG del sistema de referencia de entrada, si la entrada no tiene.
+
+        Retorna
+        -------
+        gdal.Dataset
+            Objeto dataset de GDAL con el ráster leído.
+        """
         gdal.UseExceptions()
 
         if EPSG_Entrada != None:
@@ -116,7 +154,26 @@ class FuenteDatosRaster:
         self.datasource = inDataSource
         return inDataSource
 
-    def exportar(self, EPSG_Salida = None, outputFormat = 'GTiff', WLD = False):
+    def exportar(self, EPSG_Salida = None, outputFormat = 'GTiff', WLD = False, PAM = False):
+        """
+        Exporta el ráster a un formato especificado (GTiff, JPEG, etc).
+
+        Parámetros
+        ----------
+        EPSG_Salida : int o str, opcional
+            Código EPSG del sistema de referencia de salida.
+        outputFormat : str, opcional
+            Formato de salida (por ejemplo, 'GTiff', 'JPEG').
+        WLD : bool, opcional
+            Si es True, genera archivo worldfile.
+        PAM : bool, opcional
+            Si es True, fuerza la creación de archivo PAM (.aux.xml) si es posible.
+
+        Retorna
+        -------
+        bytes
+            Archivo exportado como blob.
+        """
         gdal.UseExceptions()
 
         if self.datasource is None:
@@ -167,10 +224,25 @@ class FuenteDatosRaster:
         else:
             warp_options = gdal.WarpOptions( creationOptions=CreateOptionsArray)
 
+
+        if PAM:
+            gdal.SetConfigOption('GDAL_PAM_ENABLED', 'YES')
+        else:
+            gdal.SetConfigOption('GDAL_PAM_ENABLED', 'NO')
+
         dato = gdal.Warp(outputPath, dato, options=warp_options, format=outputFormat)
-        dato.SetMetadata({'CREATED_BY': 'GDAL Python'})
-        dato.FlushCache()
-        dato = None  # Cerrar el dataset para que se escriba el PAM
+
+        if PAM:
+            dato.SetMetadata({
+                'proyecto': 'pygdal_PG_datasource',
+                'autor': 'A²',
+            })
+            dato.FlushCache()
+
+        
+
+            
+
         filesArray = []
         for file_name in os.listdir(outPath):
             if file_name.startswith(fileName): 
