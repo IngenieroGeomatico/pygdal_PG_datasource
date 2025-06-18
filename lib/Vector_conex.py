@@ -425,26 +425,37 @@ class FuenteDatosVector:
 
     def obtener_atributos(self, capa=None):
         """
-        Devuelve la lista de campos/atributos de una capa vectorial.
+        Devuelve los atributos y sus tipos de una capa o de todas las capas.
 
         Parámetros
         ----------
         capa : str, opcional
-            Nombre de la capa (por defecto, la primera).
+            Nombre de la capa (por defecto, todas).
 
         Retorna
         -------
-        list
-            Lista de nombres de campos/atributos.
+        dict
+            Si capa es None: {nombre_capa: {campo: tipo, ...}, ...}
+            Si capa se indica: {campo: tipo, ...}
         """
         if self.datasource is None:
             raise Exception("Primero debes llamar a leer()")
-        # Si no se especifica capa, toma la primera
-        if capa is None:
-            capa = self.datasource.GetLayerByIndex(0).GetName()
-        layer = self.datasource.GetLayer(capa)
-        campos = []
-        layer_defn = layer.GetLayerDefn()
-        for i in range(layer_defn.GetFieldCount()):
-            campos.append(layer_defn.GetFieldDefn(i).GetName())
-        return campos
+
+        def campos_dict(layer):
+            layer_defn = layer.GetLayerDefn()
+            return {
+                layer_defn.GetFieldDefn(i).GetName(): layer_defn.GetFieldDefn(i).GetFieldTypeName(layer_defn.GetFieldDefn(i).GetType())
+                for i in range(layer_defn.GetFieldCount())
+            }
+
+        if capa:
+            layer = self.datasource.GetLayer(capa)
+            if layer is None:
+                raise Exception(f"No existe la capa '{capa}'")
+            return campos_dict(layer)
+        else:
+            result = {}
+            for i in range(self.datasource.GetLayerCount()):
+                lyr = self.datasource.GetLayerByIndex(i)
+                result[lyr.GetName()] = campos_dict(lyr)
+            return result
