@@ -130,29 +130,3 @@ class ConexPG:
 
         return returnQuery
 
-# Ejemplo de uso:
-#
-# from lib.PG_conex import ConexPG
-#
-# # Instanciar la clase (usando el archivo de configuración por defecto)
-# pg = ConexPG()
-#
-# # Comprobar la conexión
-# pg.conex2PG(check=True)
-#
-# # Ejecutar una consulta
-# resultado = pg.queryPG("SELECT version();")
-# print(resultado)
-#
-# # Ejemplo usando el parámetro dataJSONcon
-# parametros = {
-#     'IP': '127.0.0.1',
-#     'port': '5432',
-#     'user': 'usuario',
-#     'pass': 'contraseña',
-#     'db': 'nombre_basedatos'
-# }
-# pg2 = ConexPG(dataJSONcon=parametros)
-# pg2.conex2PG(check=True)
-# resultado2 = pg2.queryPG("SELECT NOW();")
-# print(resultado2)

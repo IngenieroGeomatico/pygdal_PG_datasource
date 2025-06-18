@@ -30,10 +30,10 @@ fuenteDatos = fuenteDatosObj.leer(banda, EPSG_Entrada)
 print(fuenteDatos)
 
 EPSG_Salida = 25830
-out_format = 'GTiff'
+out_format = 'PNG'
 WLD =True
-outDataSource= fuenteDatosObj.exportar(EPSG_Salida,out_format,WLD)
-
+PAM = True
+outDataSource= fuenteDatosObj.exportar(EPSG_Salida,out_format,WLD, PAM)
 # print(outDataSource)
 
 
