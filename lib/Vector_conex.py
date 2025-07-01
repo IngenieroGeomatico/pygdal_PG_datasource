@@ -253,14 +253,28 @@ class FuenteDatosVector:
         if outputFormat == 'application/json':
             capa = dato.GetLayerByIndex(0)
 
+            srs_original = capa.GetSpatialRef()
+            srs = osr.SpatialReference()
+            srs.ImportFromEPSG(4326)
+
+            
             geojson = {
                 "type": "FeatureCollection",
                 "features": []
             }
 
-            for feat in capa:
-                # print(feat.ExportToJson())
-                geojson["features"].append(feat.ExportToJson(as_object=True))
+            if srs != srs_original:
+                transform = osr.CoordinateTransformation(srs_original, srs)
+                for feat in capa:
+                    geom = feat.GetGeometryRef()
+                    geom.Transform(transform)  
+                    feat.SetGeometry(geom)
+                    geojson["features"].append(feat.ExportToJson(as_object=True))
+
+            else:
+                for feat in capa:
+                    # print(feat.ExportToJson())
+                    geojson["features"].append(feat.ExportToJson(as_object=True))
 
             return json.dumps(geojson)
         
@@ -422,6 +436,29 @@ class FuenteDatosVector:
             finally:
                 # Cerrar el dataset de salida
                 outDataset = None
+
+    def obtener_capas(self):
+        """
+        Devuelve una lista con los nombres de todas las capas presentes en el datasource.
+
+        Retorna
+        -------
+        list of str
+            Lista con los nombres de las capas del datasource.
+
+        Excepciones
+        -----------
+        Exception
+            Si no se ha leído ningún datasource previamente.
+        """
+        if self.datasource is None:
+            raise Exception("Primero debes llamar a leer()")
+
+        capas = []
+        for i in range(self.datasource.GetLayerCount()):
+            layer = self.datasource.GetLayerByIndex(i)
+            capas.append(layer.GetName())
+        return capas
 
     def obtener_atributos(self, capa=None):
         """
