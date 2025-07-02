@@ -117,7 +117,7 @@ class FuenteDatosVector:
         self.datasource = None
         self.multiLayers = False
 
-    def leer(self, capa=None, EPSG_Entrada=None, AllLayers=False):
+    def leer(self, capa=None, EPSG_Entrada=None, datasetCompleto=False):
         """
         Lee la fuente de datos vectorial y la carga en memoria.
 
@@ -127,7 +127,7 @@ class FuenteDatosVector:
             Nombre de la capa a leer (por defecto, la primera).
         EPSG_Entrada : int o str, opcional
             Código EPSG del sistema de referencia de entrada.
-        AllLayers : bool, opcional
+        datasetCompleto : bool, opcional
             Si es True, carga todas las capas.
 
         Retorna
@@ -166,7 +166,7 @@ class FuenteDatosVector:
             # https://gdal.org/en/stable/api/python/raster_api.html#osgeo.gdal.OpenEx
             # Abrir así si se necesita leer un archivo de forma más genérica
 
-            if AllLayers == True and capa == None:
+            if datasetCompleto == True and capa == None:
                 self.datasource = inDataSource
                 self.multiLayers = True
                 return inDataSource
@@ -276,7 +276,7 @@ class FuenteDatosVector:
                     # print(feat.ExportToJson())
                     geojson["features"].append(feat.ExportToJson(as_object=True))
 
-            return json.dumps(geojson)
+            return geojson
         
         else:
             outPath ="./tmp/"
