@@ -316,14 +316,17 @@ class FuenteDatosVector:
             # Iterar sobre todas las capas del dataset
             deleteFileifError = False
             multiFiles = False
+
             for i in range(dato.GetLayerCount()):
                 capa = dato.GetLayerByIndex(i)
                 nombreCapa = capa.GetName()
 
                 # Crear una nueva capa en el archivo de salida
                 srs = osr.SpatialReference()
-                # TODO: crear una fuente de datos por capa si da error la exportación
                 srs.ImportFromEPSG(int(EPSG_Salida))
+
+                # TODO: crear una fuente de datos por capa si da error la exportación
+
                 try:
                     outLayer = outDataSource.CreateLayer(nombreCapa, srs = srs, geom_type=capa.GetGeomType())
                     
@@ -350,8 +353,6 @@ class FuenteDatosVector:
                             if file_name.startswith(nombreCapa): 
                                 filesArray.append(os.path.join(outPath, file_name))
                             
-
-
                 except RuntimeError as e:
                     deleteFileifError = True
                     outputPath = orioutputPath.replace('.' + extension, f'_{nombreCapa}.' + extension)
@@ -460,39 +461,90 @@ class FuenteDatosVector:
             capas.append(layer.GetName())
         return capas
 
-    def obtener_atributos(self, capa=None):
+    def ejecutar_sql(self, sql, capa, dialect='OGRSQL'):
         """
-        Devuelve los atributos y sus tipos de una capa o de todas las capas.
+        Ejecuta una sentencia SQL sobre el datasource y retorna el resultado como un nuevo datasource en memoria.
+
+        Documentación de referencia: https://gdal.org/en/stable/user/ogr_sql_dialect.html
 
         Parámetros
         ----------
-        capa : str, opcional
-            Nombre de la capa (por defecto, todas).
+        sql : str
+            Sentencia SQL a ejecutar (por ejemplo, 'SELECT * FROM capa WHERE ...').
+        dialect : str, opcional
+            Dialecto SQL a usar ('OGRSQL' por defecto, también puede ser 'SQLITE').
 
         Retorna
         -------
-        dict
-            Si capa es None: {nombre_capa: {campo: tipo, ...}, ...}
-            Si capa se indica: {campo: tipo, ...}
+        ogr.DataSource
+            Nuevo datasource en memoria con el resultado de la consulta.
+
+        Excepciones
+        -----------
+        Exception
+            Si no se ha leído ningún datasource previamente o la consulta falla.
         """
         if self.datasource is None:
             raise Exception("Primero debes llamar a leer()")
 
-        def campos_dict(layer):
+        # Ejecutar la consulta SQL
+        resultado = self.datasource.ExecuteSQL(sql, dialect=dialect)
+        if resultado is None:
+            raise Exception("La consulta SQL no devolvió resultados.")
+
+        # Crear un nuevo datasource en memoria y copiar el resultado
+        mem_driver = ogr.GetDriverByName('MEMORY')
+        mem_ds = mem_driver.CreateDataSource(capa)
+        mem_ds.CopyLayer(resultado, capa, ['OVERWRITE=YES'])
+
+        # Liberar el resultado temporal
+        self.datasource.ReleaseResultSet(resultado)
+        self.datasource = mem_ds
+
+        return mem_ds
+
+    def obtener_atributos(self, capa=None):
+        """
+        Devuelve los atributos y sus tipos de una capa o de todas las capas en formato:
+        {
+            'nombre_capa': {
+                'nombre_propiedad': {'type': 'string'},
+                ...
+            },
+            ...
+        }
+        Si se indica capa, devuelve solo el diccionario de esa capa.
+        """
+        if self.datasource is None:
+            raise Exception("Primero debes llamar a leer()")
+
+        def atributos_layer(layer):
             layer_defn = layer.GetLayerDefn()
-            return {
-                layer_defn.GetFieldDefn(i).GetName(): layer_defn.GetFieldDefn(i).GetFieldTypeName(layer_defn.GetFieldDefn(i).GetType())
-                for i in range(layer_defn.GetFieldCount())
-            }
+            atributos = {}
+            for i in range(layer_defn.GetFieldCount()):
+                field_defn = layer_defn.GetFieldDefn(i)
+                field_name = field_defn.GetName()
+                field_type = field_defn.GetFieldTypeName(field_defn.GetType()).lower()
+                # Mapear tipos OGR a tipos JSON simples
+                if field_type in ['integer', 'integer64']:
+                    tipo = 'integer'
+                elif field_type in ['real', 'float', 'double']:
+                    tipo = 'number'
+                else:
+                    tipo = 'string'
+                atributos[field_name] = {'type': tipo}
+            return atributos
 
         if capa:
             layer = self.datasource.GetLayer(capa)
             if layer is None:
                 raise Exception(f"No existe la capa '{capa}'")
-            return campos_dict(layer)
+            return atributos_layer(layer)
         else:
-            result = {}
+            resultado = {}
             for i in range(self.datasource.GetLayerCount()):
                 lyr = self.datasource.GetLayerByIndex(i)
-                result[lyr.GetName()] = campos_dict(lyr)
-            return result
+                resultado[lyr.GetName()] = atributos_layer(lyr)
+            return resultado
+
+
