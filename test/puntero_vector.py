@@ -79,25 +79,27 @@ fuenteDatos = url[1]
 # FuenteDatosVector.probar_gdal_ogr()
 
 fuenteDatosObj = FuenteDatosVector(fuenteDatos)
-fuenteDatos = fuenteDatosObj.leer()
+fuenteDatos = fuenteDatosObj.leer(capa=3)
 
 capa = fuenteDatos.GetLayerByIndex(0).GetName()   
+print(capa)
 lyr = fuenteDatos.GetLayer(capa)
-print("Número de objetos geográficos:", lyr.GetFeatureCount())
+# print("Número de objetos geográficos:", lyr.GetFeatureCount())
 
 lyr.ResetReading()
 if lyr is None:
     print("No se encontró la capa con ese nombre.")
 
-# lyr.ResetReading()
+MRE= [-5.557022094726563,35.92075216811695,-5.331115722656251,36.050764426908515]
+MRE_layer = fuenteDatosObj.MRE_datos(capaEntrada=capa, MRE=MRE,EPSG_MRE=4326)
+lyr.ResetReading()
 # for feat in lyr:
-#     print(feat.ExportToJson()[0:50])
+#     print(feat.ExportToJson()[0:5])
 
-print()
 
-EPSG_Salida = 3857
+EPSG_Salida = 4326
 out_format = 'application/json'
 outDataSource = fuenteDatosObj.exportar(EPSG_Salida=EPSG_Salida, outputFormat=out_format)
-print(outDataSource)
+print("Número de obj geográficos:   ",len(outDataSource["features"]))
 
 

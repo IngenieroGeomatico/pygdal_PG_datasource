@@ -1,5 +1,6 @@
 # Documentación de referencia: 
 # https://pcjericks.github.io/py-gdalogr-cookbook/index.html
+# https://gdal.org/en/stable/api/python/index.html
 
 import os
 import sys
@@ -173,9 +174,18 @@ class FuenteDatosVector:
 
             if capa == None: 
                 capa = inDataSource.GetLayerByIndex(0).GetName()
-            
+            else:
+                try:
+                    idx = int(capa)
+                    capa = inDataSource.GetLayerByIndex(idx).GetName()
+                except (ValueError, TypeError):
+                    capa = inDataSource.GetLayer(capa).GetName()
+                if capa is None:
+                    raise Exception(f"No existe la capa '{capa}'")
+                
             lyr = inDataSource.GetLayer(capa)
-            
+
+ 
             # for feat in lyr:
             #     geom = feat.GetGeometryRef()
             #     print(geom.ExportToWkt()[0:50])
@@ -226,7 +236,7 @@ class FuenteDatosVector:
         else:
             raise('Valor de entrada no permitido')  
 
-    def exportar(self, EPSG_Salida=None, outputFormat='application/json'):
+    def exportar(self, capa = None, EPSG_Salida=None, outputFormat='application/json'):
         """
         Exporta la capa vectorial a un formato especificado (GeoJSON, Shapefile, etc).
 
@@ -251,8 +261,9 @@ class FuenteDatosVector:
         dato = self.datasource
 
         if outputFormat == 'application/json':
-            capa = dato.GetLayerByIndex(0)
-
+            # Seleccionar la capa de entrada
+            capa = self.datasource.GetLayer(self.obtener_nombreCapa(capa))
+        
             srs_original = capa.GetSpatialRef()
             srs = osr.SpatialReference()
             srs.ImportFromEPSG(4326)
@@ -267,7 +278,8 @@ class FuenteDatosVector:
                 transform = osr.CoordinateTransformation(srs_original, srs)
                 for feat in capa:
                     geom = feat.GetGeometryRef()
-                    geom.Transform(transform)  
+                    if geom is not None:
+                        geom.Transform(transform)
                     feat.SetGeometry(geom)
                     geojson["features"].append(feat.ExportToJson(as_object=True))
 
@@ -380,7 +392,8 @@ class FuenteDatosVector:
                         for feature in capa:
                             geom = feature.GetGeometryRef()
                             if transform:
-                                geom.Transform(transform)  # Reproyectar la geometría
+                                if geom is not None:
+                                    geom.Transform(transform)  # Reproyectar la geometría
 
                             outFeature = ogr.Feature(outLayer.GetLayerDefn())
                             outFeature.SetGeometry(geom)
@@ -471,6 +484,8 @@ class FuenteDatosVector:
         ----------
         sql : str
             Sentencia SQL a ejecutar (por ejemplo, 'SELECT * FROM capa WHERE ...').
+        capa : str
+            Nombre de la capa donde se guardará el resultado de la consulta.
         dialect : str, opcional
             Dialecto SQL a usar ('OGRSQL' por defecto, también puede ser 'SQLITE').
 
@@ -482,26 +497,124 @@ class FuenteDatosVector:
         Excepciones
         -----------
         Exception
-            Si no se ha leído ningún datasource previamente o la consulta falla.
+            Si no se ha leído ningún datasource previamente, la consulta falla.
         """
         if self.datasource is None:
             raise Exception("Primero debes llamar a leer()")
 
         # Ejecutar la consulta SQL
         resultado = self.datasource.ExecuteSQL(sql, dialect=dialect)
-        if resultado is None:
-            raise Exception("La consulta SQL no devolvió resultados.")
 
-        # Crear un nuevo datasource en memoria y copiar el resultado
-        mem_driver = ogr.GetDriverByName('MEMORY')
-        mem_ds = mem_driver.CreateDataSource(capa)
-        mem_ds.CopyLayer(resultado, capa, ['OVERWRITE=YES'])
-
-        # Liberar el resultado temporal
+        self.datasource.CopyLayer(resultado, capa)
         self.datasource.ReleaseResultSet(resultado)
-        self.datasource = mem_ds
+        
+        # Si la capa existe, elimínala
+        if self.datasource.GetLayerByName(capa) and self.obtener_capas().count(capa) > 1:
+            self.datasource.DeleteLayer(capa)
+            self.datasource.SyncToDisk()
 
-        return mem_ds
+        return self.datasource.GetLayerByName(capa)
+    
+    def MRE_datos(self, capaEntrada=None, capaSalida=None, MRE=[-180, -90, 180, 90], EPSG_MRE=4326):
+        """
+        Aplica un filtro espacial (bbox) a una capa y guarda la capa filtrada en el dataset con el nombre capaSalida.
+
+        Parámetros
+        ----------
+        capaEntrada : str o int
+            Nombre o índice de la capa a filtrar.
+        capaSalida : str
+            Nombre de la capa filtrada en el dataset.
+        MRE : list[float]
+            Bounding box [minx, miny, maxx, maxy].
+        EPSG_MRE : int
+            EPSG del bbox.
+
+        Retorna
+        -------
+        ogr.Layer
+            La nueva capa filtrada.
+        """
+        if self.datasource is None:
+            raise Exception("Primero debes llamar a leer()")
+
+        tmpLayer = "_tmpMRE"
+        # Seleccionar la capa de entrada
+        layer = self.datasource.GetLayer(self.obtener_nombreCapa(capaEntrada))
+        
+        # Obtener el SRS de la capa
+        srs_capa = layer.GetSpatialRef()
+        if srs_capa is None:
+            raise Exception("La capa no tiene sistema de referencia espacial definido.")
+
+        srs_bbox = osr.SpatialReference()
+        if isinstance(EPSG_MRE, str):
+            if EPSG_MRE.startswith("EPSG:"):
+                EPSG_MRE = int(EPSG_MRE.split(":")[1])
+            else:
+                EPSG_MRE = int(EPSG_MRE)
+        srs_bbox.ImportFromEPSG(EPSG_MRE)
+
+        # Crear el polígono del bbox en EPSG_MRE    
+        if srs_bbox.EPSGTreatsAsLatLong() or srs_bbox.EPSGTreatsAsNorthingEasting():
+            miny, minx, maxy, maxx = [float(b) for b in MRE]
+        else:
+            minx, miny, maxx, maxy = [float(b) for b in MRE]
+
+        pol_wkt = f"POLYGON (({minx} {miny},{minx} {maxy},{maxx} {maxy},{maxx} {miny},{minx} {miny}))"
+        
+        polygon = ogr.CreateGeometryFromWkt(pol_wkt,srs_bbox)
+        
+        # Asignar SRS solo si el polígono no lo tiene
+        polygon.AssignSpatialReference(srs_bbox)
+
+        # Transformar si es necesario
+        if not srs_capa.IsSame(srs_bbox):
+            transform = osr.CoordinateTransformation(srs_bbox, srs_capa)
+            polygon.Transform(transform)
+
+        layer.SetSpatialFilter(polygon)
+
+        if self.datasource.GetLayerByName(capaSalida) and capaSalida != capaEntrada:
+            self.datasource.DeleteLayer(capaSalida)
+            self.datasource.SyncToDisk()
+        
+        elif capaSalida is None:
+            capaSalida = capaEntrada + tmpLayer
+        
+        geom_type = layer.GetGeomType() or ogr.wkbUnknown
+        layer_salida = self.datasource.CreateLayer(capaSalida, srs_capa, geom_type)
+        if layer_salida is None:
+            raise RuntimeError(f"No se pudo crear la capa '{capaSalida}'")
+
+        layer_defn = layer.GetLayerDefn()
+        for i in range(layer_defn.GetFieldCount()):
+            field_defn = layer_defn.GetFieldDefn(i)
+            layer_salida.CreateField(field_defn)
+
+        layer_defn_salida = layer_salida.GetLayerDefn()
+        for feature in layer:
+            new_feature = ogr.Feature(layer_defn_salida)
+            new_feature.SetFrom(feature)
+            layer_salida.CreateFeature(new_feature)
+            new_feature = None
+
+        layer.SetSpatialFilter(None)
+
+        if tmpLayer in capaSalida:
+            capaSalidaReal = capaSalida.replace(tmpLayer, "")
+            # Si la capa existe, elimínala
+            if self.datasource.GetLayerByName(capaSalidaReal):
+                self.datasource.DeleteLayer(capaSalidaReal)
+                self.datasource.SyncToDisk()
+            self.datasource.CopyLayer(layer_salida, capaSalidaReal)
+            self.datasource.DeleteLayer(capaSalida)
+            self.datasource.SyncToDisk()
+            capaSalida = capaSalidaReal
+
+        layer_salida = None
+
+        return self.datasource.GetLayerByName(capaSalida)
 
     def obtener_atributos(self, capa=None):
         """
@@ -547,4 +660,37 @@ class FuenteDatosVector:
                 resultado[lyr.GetName()] = atributos_layer(lyr)
             return resultado
 
+    def obtener_nombreCapa(self, capa=None):
 
+        if capa is None:
+            layer = self.datasource.GetLayerByIndex(0)
+        else:
+            try:
+                idx = int(capa)
+                layer = self.datasource.GetLayerByIndex(idx)
+            except (ValueError, TypeError):
+                layer = self.datasource.GetLayer(capa)
+            if layer is None:
+                raise Exception(f"No existe la capa '{capa}'")
+            
+        return layer.GetName()
+
+    def obtener_indice_capa(self, nombre_capa):
+        """
+        Devuelve el índice de la capa dado su nombre.
+        Lanza una excepción si no existe.
+        """
+        for i in range(self.datasource.GetLayerCount()):
+            layer = self.datasource.GetLayerByIndex(i)
+            if layer.GetName() == nombre_capa:
+                return i
+        raise Exception(f"No existe la capa '{nombre_capa}'")
+
+    def borrar_geometria(self, capa=None):
+        layer = self.datasource.GetLayer(self.obtener_nombreCapa(capa))
+        for feature in layer:
+            feature.SetGeometry(None)
+            layer.SetFeature(feature)
+
+        return layer
+        
