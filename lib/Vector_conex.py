@@ -721,3 +721,66 @@ class FuenteDatosVector:
 
         return layer
     
+    def obtener_objeto_porID(self, capaEntrada=None, capaSalida=None, ID='ID_OGR', valorID=0):
+        """
+        Obtiene un objeto por su ID en una capa específica.
+
+        :param capaEntrada: nombre o índice de la capa
+        :param capaSalida: nombre de la capa de salida con el resultado
+        :param ID: nombre del campo ID a buscar
+        :param valorID: valor del ID a buscar
+        :return: capa con el objeto encontrado o None si no existe.
+        """
+        nombre_entrada = self.obtener_nombreCapa(capaEntrada)
+        layer = self.datasource.GetLayerByName(nombre_entrada)
+
+        if not layer:
+            raise Exception(f"No existe la capa '{capaEntrada}'")
+
+        # Aplicar filtro
+        filter_expr = f"{ID} = '{valorID}'" if isinstance(valorID, str) else f"{ID} = {valorID}"
+        layer.SetAttributeFilter(filter_expr)
+
+        # Si no se especifica capa de salida o es igual que la de entrada
+        overwrite = False
+        if capaSalida is None or capaSalida == capaEntrada:
+            capaSalida = f"{nombre_entrada}_tmp"
+            overwrite = True
+
+        # Crear capa de salida
+        srs = layer.GetSpatialRef()
+        geom_type = layer.GetGeomType()
+        layer_defn = layer.GetLayerDefn()
+
+        # Eliminar si ya existe
+        if self.datasource.GetLayerByName(capaSalida):
+            self.datasource.DeleteLayer(capaSalida)
+            self.datasource.SyncToDisk()
+
+        capa_salida = self.datasource.CreateLayer(capaSalida, srs, geom_type)
+
+        # Copiar campos
+        for i in range(layer_defn.GetFieldCount()):
+            field_defn = layer_defn.GetFieldDefn(i)
+            capa_salida.CreateField(field_defn)
+
+        # Copiar features filtradas
+        for feature in layer:
+            new_feature = ogr.Feature(capa_salida.GetLayerDefn())
+            new_feature.SetFrom(feature)
+            capa_salida.CreateFeature(new_feature)
+            new_feature = None
+
+        # Restaurar capa de entrada
+        layer.SetAttributeFilter(None)
+
+        # Si es sobrescritura, renombrar
+        if overwrite:
+            self.datasource.DeleteLayer(nombre_entrada)
+            self.datasource.CopyLayer(capa_salida, nombre_entrada)
+            self.datasource.DeleteLayer(capaSalida)
+            self.datasource.SyncToDisk()
+            capaSalida = nombre_entrada
+
+        return self.datasource.GetLayerByName(capaSalida)
+            
