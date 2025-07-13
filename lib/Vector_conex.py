@@ -236,7 +236,7 @@ class FuenteDatosVector:
         else:
             raise('Valor de entrada no permitido')  
 
-    def exportar(self, capa = None, EPSG_Salida=None, outputFormat='application/json'):
+    def exportar(self, capa = None, EPSG_Salida=None, outputFormat='application/json', ID=None):
         """
         Exporta la capa vectorial a un formato especificado (GeoJSON, Shapefile, etc).
 
@@ -281,12 +281,16 @@ class FuenteDatosVector:
                     if geom is not None:
                         geom.Transform(transform)
                     feat.SetGeometry(geom)
-                    geojson["features"].append(feat.ExportToJson(as_object=True))
+                    obj = feat.ExportToJson(as_object=True)
+                    if ID:
+                        obj['id'] = feat.GetField(ID)
+                    geojson["features"].append(obj)
 
             else:
                 for feat in capa:
-                    # print(feat.ExportToJson())
-                    geojson["features"].append(feat.ExportToJson(as_object=True))
+                    if ID:
+                        obj['id'] = feat.GetField(ID)
+                    geojson["features"].append(obj)
 
             return geojson
         
@@ -693,4 +697,27 @@ class FuenteDatosVector:
             layer.SetFeature(feature)
 
         return layer
+
+    def crear_ID(self, capa=None, nombreCampo='ID_OGR'):
+        """
+        Crea una ID para una capa y le asigna un valor secuencial.
         
+        :param capa: nombre o identificador de la capa
+        :param nombreCampo: nombre del campo ID
+        :return: capa con el campo ID creado
+        """
+        layer = self.datasource.GetLayer(self.obtener_nombreCapa(capa))
+        
+        id_field = ogr.FieldDefn(nombreCampo, ogr.OFTInteger)
+        layer.CreateField(id_field)
+
+        # Asigna valores secuenciales
+        for i, feature in enumerate(layer):
+            feature.SetField(nombreCampo, i)
+            layer.SetFeature(feature)  # guarda el cambio
+            feature = None  # limpia
+
+        layer.SyncToDisk()  # asegura que se guarden los cambios
+
+        return layer
+    
