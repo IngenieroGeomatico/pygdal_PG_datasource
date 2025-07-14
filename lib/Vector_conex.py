@@ -268,6 +268,12 @@ class FuenteDatosVector:
             srs = osr.SpatialReference()
             srs.ImportFromEPSG(4326)
 
+            layer_defn = capa.GetLayerDefn()
+
+            # Comprobar si existe
+            idx = layer_defn.GetFieldIndex(ID)
+            if idx == -1:
+                ID = None
             
             geojson = {
                 "type": "FeatureCollection",
