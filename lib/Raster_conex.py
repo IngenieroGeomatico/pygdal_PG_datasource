@@ -3,6 +3,7 @@
 
 import os
 import sys
+import uuid
 import json
 import zipfile
 
@@ -316,6 +317,8 @@ class FuenteDatosRaster:
         
         outPath ="./tmp/"
         fileName = os.path.splitext(os.path.basename(dato.GetDescription()))[0]
+        if not fileName:
+            fileName = str(uuid.uuid4())
         outputPath = outPath + fileName
         outputDir = os.path.dirname(outputPath)
         if not os.path.exists(outputDir):
@@ -407,6 +410,7 @@ class FuenteDatosRaster:
             with open(outputPath, 'rb') as archivo:
                 blob = archivo.read()
             print(f"Archivo ráster guardado exitosamente en: {outputPath}")
+            os.remove(outputPath)
             return blob
         
         except Exception as e:
