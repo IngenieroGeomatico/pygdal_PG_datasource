@@ -745,7 +745,7 @@ class FuenteDatosRaster:
         proj = self.datasource.GetProjection()
         geotransform = self.datasource.GetGeoTransform()
 
-        # Usar el tipo de la primera banda seleccionada (puedes adaptarlo si son distintos)
+        # Usar el tipo de la primera banda seleccionada
         band_type = self.datasource.GetRasterBand(bandas[0]).DataType
 
         # Crear nuevo dataset en memoria
@@ -754,7 +754,7 @@ class FuenteDatosRaster:
         out_ds.SetProjection(proj)
         out_ds.SetGeoTransform(geotransform)
 
-        # Copiar las bandas seleccionadas
+        # Copiar cada banda y sus propiedades
         for i, b in enumerate(bandas, start=1):
             in_band = self.datasource.GetRasterBand(b)
             out_band = out_ds.GetRasterBand(i)
@@ -763,17 +763,91 @@ class FuenteDatosRaster:
             data = in_band.ReadAsArray()
             out_band.WriteArray(data)
 
-            # Copiar nodata si existe
+            # Copiar nodata
             nodata = in_band.GetNoDataValue()
             if nodata is not None:
                 out_band.SetNoDataValue(float(nodata))
 
+            # Copiar nombre/descripcion
+            desc = in_band.GetDescription()
+            if desc:
+                out_band.SetDescription(desc)
+
+            # Copiar metadata
+            md = in_band.GetMetadata()
+            if md:
+                out_band.SetMetadata(md)
+
+            # Copiar color table (si existe)
+            ctable = in_band.GetColorTable()
+            if ctable:
+                out_band.SetColorTable(ctable)
+
+            # Copiar nombres de categorías (si existen)
+            cats = in_band.GetCategoryNames()
+            if cats:
+                out_band.SetCategoryNames(cats)
+
             out_band.FlushCache()
 
-        # Reemplazar el dataset original por el nuevo
+        # Reemplazar dataset
         self.datasource = out_ds
 
-        # Devolver lista de objetos banda del nuevo dataset
         return [self.datasource.GetRasterBand(i) for i in range(1, len(bandas) + 1)]
 
-       
+    def redimensionar(self, height=None, width=None):
+        """
+        Redimensiona el dataset a un nuevo tamaño (height x width).
+        Si no se especifican height o width, se usan las dimensiones originales.
+        
+        :param height: Nueva altura (número de filas)
+        :param width: Nuevo ancho (número de columnas)
+        :return: lista de objetos gdal.Band del nuevo dataset
+        """
+        if self.datasource is None:
+            raise Exception("Dataset no cargado")
+
+        # Dimensiones originales
+        orig_width = self.datasource.RasterXSize
+        orig_height = self.datasource.RasterYSize
+
+        # Usar valores originales si no se pasan parámetros
+        new_width = int(width) if width is not None else orig_width
+        new_height = int(height) if height is not None else orig_height
+
+        # Proyección y geotransformación originales
+        proj = self.datasource.GetProjection()
+        geotransform = self.datasource.GetGeoTransform()
+        nbands = self.datasource.RasterCount
+
+        # Tipo de dato de la primera banda
+        band_type = self.datasource.GetRasterBand(1).DataType
+
+        # Crear nuevo dataset en memoria
+        driver = gdal.GetDriverByName('MEM')
+        out_ds = driver.Create('', new_width, new_height, nbands, band_type)
+        out_ds.SetProjection(proj)
+
+        # Ajustar geotransformación para nuevas dimensiones
+        xres = (geotransform[1] * orig_width) / new_width
+        yres = (geotransform[5] * orig_height) / new_height
+        new_gt = (geotransform[0], xres, geotransform[2],
+                geotransform[3], geotransform[4], yres)
+        out_ds.SetGeoTransform(new_gt)
+
+        # Remuestrear bandas
+        for i in range(1, nbands + 1):
+            in_band = self.datasource.GetRasterBand(i)
+            data = in_band.ReadAsArray(buf_xsize=new_width, buf_ysize=new_height)
+            out_band = out_ds.GetRasterBand(i)
+            out_band.WriteArray(data)
+            nodata = in_band.GetNoDataValue()
+            if nodata is not None:
+                out_band.SetNoDataValue(float(nodata))
+            out_band.FlushCache()
+
+        # Reemplazar dataset original
+        self.datasource = out_ds
+
+        # Devolver lista de objetos banda
+        return [self.datasource.GetRasterBand(i) for i in range(1, nbands + 1)]
