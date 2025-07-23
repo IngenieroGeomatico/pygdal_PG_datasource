@@ -206,29 +206,34 @@ class FuenteDatosVector:
 
         elif tipoEntrada == 'wkt':
 
-            if EPSG_Entrada == None:
-                raise('Falta EPSG de entrada')
-            
+            if EPSG_Entrada is None:
+                raise Exception('Falta EPSG de entrada')
+
             srs = osr.SpatialReference()
+
+            if isinstance(EPSG_Entrada, str):
+                EPSG_Entrada = EPSG_Entrada.replace(" ", "")
+                if EPSG_Entrada.startswith("EPSG:"):
+                    EPSG_Entrada = int(EPSG_Entrada.split(":")[1])
+                else:
+                    EPSG_Entrada = int(EPSG_Entrada)
+
             srs.ImportFromEPSG(EPSG_Entrada)
 
-            outDriver=ogr.GetDriverByName('MEMORY')
+            outDriver = ogr.GetDriverByName('MEMORY')
             outDataSource = outDriver.CreateDataSource('memData')
-            outLayer = outDataSource.CreateLayer("tmp")
+            outLayer = outDataSource.CreateLayer("tmp", srs=srs)
 
             # Add an ID field
             idField = ogr.FieldDefn("id", ogr.OFTInteger)
             outLayer.CreateField(idField)
 
-            # Create the feature and set values
             featureDefn = outLayer.GetLayerDefn()
             feature = ogr.Feature(featureDefn)
             feature.SetGeometry(geom)
-            feature.SetField("id", ogr.OFTInteger)
+            feature.SetField("id", 1)  # aquí asignamos un valor entero
             outLayer.CreateFeature(feature)
 
-            # for feat in outLayer:
-            #     print(feat.ExportToJson())
             self.datasource = outDataSource
             self.multiLayers = False
             return outDataSource
@@ -260,7 +265,7 @@ class FuenteDatosVector:
 
         dato = self.datasource
 
-        if outputFormat == 'application/json':
+        if outputFormat == 'application/json'  or outputFormat == 'json':
             # Seleccionar la capa de entrada
             capa = self.datasource.GetLayer(self.obtener_nombreCapa(capa))
         
@@ -271,16 +276,20 @@ class FuenteDatosVector:
             layer_defn = capa.GetLayerDefn()
 
             # Comprobar si existe
-            idx = layer_defn.GetFieldIndex(ID)
-            if idx == -1:
-                ID = None
+            if ID:
+                idx = layer_defn.GetFieldIndex(ID)
+                if idx == -1:
+                    ID = None
             
             geojson = {
                 "type": "FeatureCollection",
                 "features": []
             }
 
-            if srs != srs_original:
+
+            if (not srs.IsSame(srs_original) and 
+                srs_original.GetAttrValue("AUTHORITY", 1)!=srs.GetAttrValue("AUTHORITY", 1)):
+
                 transform = osr.CoordinateTransformation(srs_original, srs)
                 for feat in capa:
                     geom = feat.GetGeometryRef()
@@ -294,6 +303,7 @@ class FuenteDatosVector:
 
             else:
                 for feat in capa:
+                    obj = feat.ExportToJson(as_object=True)
                     if ID:
                         obj['id'] = feat.GetField(ID)
                     geojson["features"].append(obj)
@@ -789,4 +799,104 @@ class FuenteDatosVector:
             capaSalida = nombre_entrada
 
         return self.datasource.GetLayerByName(capaSalida)
-            
+
+    def reproyectar_datasource(self, EPSG_salida):
+        """
+        Reproyecta todas las capas de self.datasource al EPSG_salida.
+        Si una capa ya está en ese EPSG, simplemente se copia sin reproyección.
+        """
+        src_ds = self.datasource
+        driver = ogr.GetDriverByName("Memory")
+        dst_ds = driver.CreateDataSource("")
+
+        # Crear SRS objetivo
+        target_srs = osr.SpatialReference()
+        target_srs.ImportFromEPSG(EPSG_salida)
+
+        for i in range(src_ds.GetLayerCount()):
+            layer = src_ds.GetLayerByIndex(i)
+            source_srs = layer.GetSpatialRef()
+
+            if source_srs is None:
+                raise ValueError(f"La capa {i} no tiene definido un sistema de referencia espacial (SRS)")
+
+            # Determinar si necesita transformación
+            if (target_srs.IsSame(source_srs) and 
+                source_srs.GetAttrValue("AUTHORITY", 1)==target_srs.GetAttrValue("AUTHORITY", 1)):
+
+                transform = None
+            else:
+                transform = osr.CoordinateTransformation(source_srs, target_srs)
+                print(f">>> Reproyectando capa '{layer.GetName()}' de {source_srs.GetAttrValue('AUTHORITY',1)} a {EPSG_salida}")
+
+            # Crear nueva capa
+            dst_layer = dst_ds.CreateLayer(layer.GetName(), srs=target_srs, geom_type=layer.GetGeomType())
+
+            # Copiar campos
+            layer_defn = layer.GetLayerDefn()
+            for j in range(layer_defn.GetFieldCount()):
+                dst_layer.CreateField(layer_defn.GetFieldDefn(j))
+
+            dst_defn = dst_layer.GetLayerDefn()
+
+            # Copiar y (si es necesario) transformar geometrías
+            for feature in layer:
+                geom = feature.GetGeometryRef()
+                if geom:
+                    geom_clone = geom.Clone()
+                    if transform:
+                        geom_clone.Transform(transform)
+
+                    new_feat = ogr.Feature(dst_defn)
+                    new_feat.SetGeometry(geom_clone)
+                    for j in range(layer_defn.GetFieldCount()):
+                        new_feat.SetField(j, feature.GetField(j))
+                    dst_layer.CreateFeature(new_feat)
+                    new_feat = None
+
+            layer.ResetReading()
+
+        # Reemplazar datasource
+        self.datasource = dst_ds
+        return dst_ds
+
+    def añadir_capa(self, src_capa):
+        """
+        Añade al DataSource dst_ds una capa basada en src_layer (objeto ogr.Layer).
+        Si ya existe una capa con ese nombre en dst_ds, la elimina primero.
+
+        Copia la estructura (campos) y todas las features con sus geometrías.
+        """
+        dst_ds =  self.datasource
+        layer_name = src_capa.GetName()
+
+        # Si ya existe la capa destino, eliminarla
+        existing_layer = dst_ds.GetLayerByName(layer_name)
+        if existing_layer:
+            dst_ds.DeleteLayer(layer_name)
+
+        # Crear nueva capa en dst_ds con el mismo SRS y tipo geométrico que src_capa
+        srs = src_capa.GetSpatialRef()
+        geom_type = src_capa.GetGeomType()
+        dst_layer = dst_ds.CreateLayer(layer_name, srs=srs, geom_type=geom_type)
+
+        # Copiar campos (atributos)
+        src_defn = src_capa.GetLayerDefn()
+        for i in range(src_defn.GetFieldCount()):
+            field_defn = src_defn.GetFieldDefn(i)
+            dst_layer.CreateField(field_defn)
+
+        dst_defn = dst_layer.GetLayerDefn()
+
+        # Copiar features (geometría + atributos)
+        for feature in src_capa:
+            new_feature = ogr.Feature(dst_defn)
+            new_feature.SetGeometry(feature.GetGeometryRef())
+            for i in range(src_defn.GetFieldCount()):
+                new_feature.SetField(i, feature.GetField(i))
+            dst_layer.CreateFeature(new_feature)
+            new_feature = None
+
+        src_capa.ResetReading()
+        return dst_layer
+
