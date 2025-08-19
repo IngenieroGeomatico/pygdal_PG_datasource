@@ -2,7 +2,7 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from conex.sonoff_conex import FuenteDatosSonoff, FuenteDatosSonoff_SQLITE
+from conex.sonoff_conex import FuenteDatosSonoff, FuenteDatosSonoff_SQLITE, FuenteDatosSonoff_OGR
 from conex.sonoff_conex import infoSonoff
 
 
@@ -87,3 +87,14 @@ FuenteDatosSonoff_SQLITE_obj = FuenteDatosSonoff_SQLITE(
 FuenteDatosSonoff_SQLITE_obj.leer()
 gjson = FuenteDatosSonoff_SQLITE_obj.exportar_geojson()
 print(gjson)
+
+
+FuenteDatosSonoff_OGR_obj = FuenteDatosSonoff_OGR(
+    ruta_SQLite_devices=ruta_SQLite_devices,
+    ruta_json_params=ruta_json_params
+)
+
+fuenteDatos = FuenteDatosSonoff_OGR_obj.leer(capa=1)
+print(fuenteDatos)
+capa = fuenteDatos.GetLayerByIndex(0).GetName()   
+print(capa)

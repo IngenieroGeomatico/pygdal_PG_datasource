@@ -10,8 +10,15 @@ import hashlib
 import requests
 import datetime
 
+try:
+    from osgeo import ogr, osr, gdal
+except:
+    sys.exit('ERROR: cannot find GDAL/OGR modules')
+
 from .lib_sonoff.peticiones_sonoff import mDNS_todos, mDNS
 from .lib_sonoff.cripto_sonoff import decrypt
+
+from .Vector_conex import FuenteDatosVector
 
 
 class infoSonoff:
@@ -689,120 +696,106 @@ class FuenteDatosSonoff_SQLITE(infoSonoff,geojsonQuery):
         return geojson
 
     
-class FuenteDatosSonoff_OGR:
+class FuenteDatosSonoff_OGR(infoSonoff,FuenteDatosVector):
     """
     Clase para gestionar la lectura, consulta y exportación de ddatos provenientes de IoT Sonoff.
 
 
     """
 
-    def __init__(self):
-        """
+    def __init__(self, ruta_json_params, ruta_SQLite_devices):
+        infoSonoff.__init__(self, ruta_json_params)
+        FuenteDatosVector.__init__(self, ruta_SQLite_devices)
+        self.ruta_sqlite = ruta_SQLite_devices
         
+    def leer(self, capa=None, EPSG_Entrada=4326, datasetCompleto=False):
         """
+        Convierte tablas SQLite con campos longitud/latitud en dataset OGR en memoria con geometría puntual.
 
-        
+        Parámetros:
+            capa (str | None): nombre de la capa a leer. Si None se comporta según datasetCompleto.
+            EPSG_Entrada (int): EPSG del sistema de referencia de entrada (por defecto 4326).
+            datasetCompleto (bool): si True, procesa todas las capas; si False, sólo la primera.
 
-    def leer(self):
+        Devuelve:
+            out_ds (ogr.DataSource): dataset en memoria con geometrías construidas.
         """
-        
-        """
-        
-        return 
+        # Abrir dataset SQLite de entrada
+        ds = ogr.Open(self.ruta_sqlite)
+        if ds is None:
+            raise RuntimeError(f"No se pudo abrir la base de datos {self.ruta_sqlite}")
 
+        # Crear dataset en memoria
+        outdriver = ogr.GetDriverByName("MEMORY")
+        out_ds = outdriver.CreateDataSource("out_mem")
 
-    def exportar(self):
-        """
-        
-        """
-        
-        return 
+        # Definir SRS
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(EPSG_Entrada)
 
+        def procesar_capa(in_layer, nombre_capa):
+            # Crear capa de salida en memoria
+            out_layer = out_ds.CreateLayer(nombre_capa, srs, ogr.wkbPoint)
 
-    def obtener_capas(self):
-        """
-        
-        """
-        
-        return 
+            # Copiar campos
+            in_defn = in_layer.GetLayerDefn()
+            for i in range(in_defn.GetFieldCount()):
+                field_defn = in_defn.GetFieldDefn(i)
+                out_layer.CreateField(field_defn)
 
+            out_defn = out_layer.GetLayerDefn()
 
-    def ejecutar_sql(self):
-        """
-        
-        """
-        
-        return 
+            # Procesar features
+            for in_feat in in_layer:
+                extra_raw = in_feat.GetField("extra")
+                extra_json = json.loads(extra_raw)
+                lon = float(extra_json.get("long"))
+                lat = float(extra_json.get("lat"))
+                if lon is None or lat is None:
+                    continue
 
-    
-    def MRE_datos(self):
-        """
-        
-        """
-        
-        return 
+                geom = ogr.Geometry(ogr.wkbPoint)
+                geom.AddPoint(float(lon), float(lat))
 
+                out_feat = ogr.Feature(out_defn)
+                out_feat.SetGeometry(geom)
 
-    def obtener_atributos(self):
-        """
-        
-        """
-        
-        return 
+                # Copiar atributos
+                for i in range(out_defn.GetFieldCount()):
+                    out_feat.SetField(out_defn.GetFieldDefn(i).GetNameRef(),
+                                    in_feat.GetField(i))
 
+                out_layer.CreateFeature(out_feat)
+                out_feat = None
 
-    def obtener_nombreCapa(self):
-        """
-        
-        """
-        
-        return 
+            in_layer.ResetReading()
 
+        # Selección de capas según parámetros
+        if capa is not None:
+            try:
+                idx = int(capa)
+                layer = ds.GetLayerByIndex(idx)
+            except (ValueError, TypeError):
+                layer = ds.GetLayer(capa)
+            if layer is None:
+                raise Exception(f"No existe la capa '{capa}'")
+            
+            in_layer = ds.GetLayer(capa)
+            if in_layer is None:
+                raise ValueError(f"La capa {capa} no existe en {self.ruta_sqlite}")
+            procesar_capa(in_layer, in_layer.GetName())
+            self.multiLayers = False
 
-    def obtener_indice_capa(self):
-        """
-        
-        """
-        
-        return 
+        elif datasetCompleto:
+            for i in range(ds.GetLayerCount()):
+                in_layer = ds.GetLayerByIndex(i)
+                procesar_capa(in_layer, in_layer.GetName())
+                self.multiLayers = True
 
+        else:
+            in_layer = ds.GetLayerByIndex(0)
+            procesar_capa(in_layer, in_layer.GetName())
+            self.multiLayers = False
 
-    def borrar_geometria(self):
-        """
-        
-        """
-        
-        return 
-
-
-    def crear_ID(self):
-        """
-        
-        """
-        
-        return 
-
-    
-    def obtener_objeto_porID(self):
-        """
-        
-        """
-        
-        return 
-
-
-    def reproyectar_datasource(self):
-        """
-        
-        """
-        
-        return 
-
-
-    def añadir_capa(self):
-        """
-        
-        """
-        
-        return 
-
+        self.datasource = out_ds
+        return out_ds
