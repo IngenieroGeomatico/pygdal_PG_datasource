@@ -1,9 +1,11 @@
 
 # Python
 import os
+import re
 import sys
 import json
 import hmac
+import copy
 import base64
 import sqlite3
 import hashlib
@@ -20,12 +22,9 @@ from .lib_sonoff.cripto_sonoff import decrypt
 
 from .Vector_conex import FuenteDatosVector
 
-
 class infoSonoff:
     """
     Clase para gestionar la lectura, consulta y exportación de ddatos provenientes de IoT Sonoff.
-
-
     """
 
     def __init__(self, ruta_json_params=None):
@@ -196,7 +195,6 @@ class infoSonoff:
             params={"rt": auth["rt"]},
         )
         resp = r.json()
-        print(resp)
         if resp["error"] != 0:
             raise Exception(resp["msg"])
 
@@ -223,7 +221,18 @@ class infoSonoff:
 
         return resp
 
-    def get_devices(self, auth: dict, ruta_json_devices = None):
+    def get_devices(self, auth: dict, ruta_json_devices = None, readOnlyJSON = False):
+
+        if readOnlyJSON:
+            with open(ruta_json_devices, 'r', encoding='utf-8') as f:
+                try:
+                    jsonDevices = json.load(f)
+                    self.ruta_json_devices = ruta_json_devices
+                    self.jsonDevices = jsonDevices
+                    return jsonDevices
+                except json.JSONDecodeError:
+                    pass
+                    
 
         def headers() -> dict:
             return {"Authorization": "Bearer " + auth["at"]}
@@ -262,7 +271,8 @@ class infoSonoff:
             if not os.path.exists(ruta_json_devices):
                 with open(ruta_json_devices, 'w', encoding='utf-8') as f:
                     json.dump(templateJSON, f, ensure_ascii=False, indent=4)
-                templateJSON = templateJSON
+                jsonDevices = templateJSON
+                print(f'Archivo {ruta_json_devices} creado con plantilla por defecto.')
 
         if not os.path.exists(ruta_json_devices):
             with open(ruta_json_devices, 'w', encoding='utf-8') as f:
@@ -271,14 +281,10 @@ class infoSonoff:
             print(f'Archivo {ruta_json_devices} creado con plantilla por defecto.')
 
         else:
-            with open(ruta_json_devices, 'r', encoding='utf-8') as f:
-                try:
-                    jsonDevices = json.load(f)
-                except json.JSONDecodeError:
-                    with open(ruta_json_devices, 'w', encoding='utf-8') as f:
-                        json.dump(templateJSON, f, ensure_ascii=False, indent=4)
-                    print(f'Archivo {ruta_json_devices} creado con plantilla por defecto.')
-                    return
+            with open(ruta_json_devices, 'w', encoding='utf-8') as f:
+                json.dump(templateJSON, f, ensure_ascii=False, indent=4)
+            jsonDevices = templateJSON
+            print(f'Archivo {ruta_json_devices} creado con plantilla por defecto.')
                 
         self.ruta_json_devices = ruta_json_devices
         self.jsonDevices = jsonDevices
@@ -390,6 +396,38 @@ class infoSonoff:
 
         return por_tipo
     
+    def dividir_por_tipo_sqlite(self, tipo=None):
+        if not hasattr(self, "ruta_SQLite_devices") or not self.ruta_SQLite_devices:
+            raise Exception("Debes definir primero self.ruta_SQLite_devices con la ruta al archivo SQLite")
+
+        conn = sqlite3.connect(self.ruta_SQLite_devices)
+        cursor = conn.cursor()
+
+        # Obtener lista de tablas
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tablas = [row[0] for row in cursor.fetchall()]
+
+        if not tablas:
+            conn.close()
+            raise Exception("El archivo SQLite no contiene tablas (capas)")
+
+        por_tipo = {}
+
+        for tabla in tablas:
+            # Si se pide un tipo concreto, saltar las demás
+            if tipo and tabla != tipo:
+                continue
+
+            cursor.execute(f"SELECT * FROM {tabla};")
+            registros = cursor.fetchall()
+            columnas = [desc[0] for desc in cursor.description]
+
+            # Guardamos registros como lista de dicts
+            por_tipo[tabla] = [dict(zip(columnas, row)) for row in registros]
+
+        conn.close()
+        return por_tipo
+
     def obtener_tipos(self):
         if not self.jsonDevices:
             raise Exception('Se tiene que lanzar primero get_devices() para obtener los dispositivos')
@@ -405,6 +443,24 @@ class infoSonoff:
             por_tipo[product_model][device_id] = device_data
 
         return list(por_tipo.keys())
+    
+    def obtener_tipos_sqlite(self):
+        if not hasattr(self, "ruta_SQLite_devices") or not self.ruta_SQLite_devices:
+            raise Exception("Debes definir primero self.ruta_SQLite_devices con la ruta al archivo SQLite")
+
+        conn = sqlite3.connect(self.ruta_SQLite_devices)
+        cursor = conn.cursor()
+
+        # Obtener todas las tablas de la base de datos (cada tabla es un 'tipo')
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tablas = [row[0] for row in cursor.fetchall()]
+
+        conn.close()
+
+        if not tablas:
+            raise Exception("El archivo SQLite no contiene tablas (capas)")
+
+        return tablas
     
     def jsonDevices2SQLite(self, ruta_SQLite_devices=None):
         """
@@ -482,7 +538,251 @@ class infoSonoff:
 class geojsonQuery:
     def __init__(self):
         self.geojson = {}
+    
+    def MRE_datos(self, MRE=[-180, -90, 180, 90]):
+        """
+        Filtra el geojson según un BBOX (MRE: minx, miny, maxx, maxy).
+        Devuelve un GeoJSON con los features que estén dentro o que toquen al BBOX.
+        Compatible con Point, MultiPoint, LineString, MultiLineString,
+        Polygon, MultiPolygon y GeometryCollection.
+        """
+        minx, miny, maxx, maxy = MRE
 
+        def point_in_bbox(x, y):
+            return minx <= x <= maxx and miny <= y <= maxy
+
+        def geometry_in_bbox(geometry):
+            gtype = geometry["type"]
+            coords = geometry.get("coordinates")
+
+            if gtype == "Point":
+                return point_in_bbox(*coords)
+
+            elif gtype in ("MultiPoint", "LineString"):
+                return any(point_in_bbox(x, y) for x, y in coords)
+
+            elif gtype in ("MultiLineString", "Polygon"):
+                return any(point_in_bbox(x, y) for ring in coords for x, y in ring)
+
+            elif gtype == "MultiPolygon":
+                return any(point_in_bbox(x, y) for poly in coords for ring in poly for x, y in ring)
+
+            elif gtype == "GeometryCollection":
+                return any(geometry_in_bbox(geom) for geom in geometry["geometries"])
+
+            return False
+
+        # Filtrar features
+        features_filtrados = [
+            f for f in self.geojson["features"]
+            if geometry_in_bbox(f["geometry"])
+        ]
+
+        self.geojson = {
+            "type": "FeatureCollection",
+            "features": features_filtrados
+        }
+
+        return self.geojson
+
+    def obtener_atributos(self):
+        """
+        Devuelve los atributos y sus tipos de self.geojson en formato:
+        {
+            'nombre_propiedad': {'type': 'string' | 'integer' | 'number' | 'boolean' | 'null'}
+        }
+        """
+        if not hasattr(self, "geojson") or self.geojson is None:
+            raise Exception("Primero debes cargar un geojson en self.geojson")
+
+        # Inferir tipo a partir de valores
+        def inferir_tipo(valor):
+            if isinstance(valor, bool):
+                return "boolean"
+            elif isinstance(valor, int):
+                return "integer"
+            elif isinstance(valor, float):
+                return "number"
+            elif valor is None:
+                return "null"
+            else:
+                return "string"
+
+        atributos = {}
+        for feature in self.geojson.get("features", []):
+            for k, v in feature.get("properties", {}).items():
+                tipo = inferir_tipo(v)
+                if k in atributos:
+                    # Si ya existía y no coincide el tipo, generalizar a string
+                    if atributos[k]["type"] != tipo:
+                        atributos[k]["type"] = "string"
+                else:
+                    atributos[k] = {"type": tipo}
+
+        return atributos
+
+    def crear_ID(self, nombreCampo='ID_OGR'):
+        """
+        Crea un campo ID en self.geojson y le asigna un valor secuencial
+        a cada feature (0, 1, 2, ...).
+
+        :param nombreCampo: nombre del campo ID a crear
+        :return: geojson con el campo ID añadido
+        """
+        if not hasattr(self, "geojson") or self.geojson is None:
+            raise Exception("Primero debes cargar un geojson en self.geojson")
+
+        for i, feature in enumerate(self.geojson.get("features", [])):
+            if "properties" not in feature:
+                feature["properties"] = {}
+            feature["properties"][nombreCampo] = i
+            feature["id"] = i
+
+        return self.geojson
+
+    def obtener_objeto_porID(self, ID='ID_OGR', valorID=0):
+        """
+        Obtiene un objeto por su ID en self.geojson.
+
+        :param ID: nombre del campo ID a buscar
+        :param valorID: valor del ID a buscar
+        :return: GeoJSON con la(s) feature(s) encontradas o None si no existe.
+        """
+        if not hasattr(self, "geojson") or self.geojson is None:
+            raise Exception("Primero debes cargar un geojson en self.geojson")
+
+        coincidencias = [
+            f for f in self.geojson.get("features", [])
+            if f.get("properties", {}).get(ID) == valorID
+        ]
+
+        if not coincidencias:
+            return None
+        
+        self.geojson = {
+            "type": "FeatureCollection",
+            "features": coincidencias
+        }
+
+        return self.geojson
+    
+    def aplicar_filtro_sql(self, filtro_sql):
+        """
+        Aplica un filtro SQL-like a un GeoJSON (dict en memoria) sin librerías externas.
+        Soporta: =, >, <, >=, <=, AND, OR, NOT y paréntesis.
+        Detecta automáticamente números y strings (comillas simples o dobles opcionales).
+        """
+        if not hasattr(self, "geojson") or self.geojson is None:
+            raise Exception("Primero debes cargar un geojson en self.geojson")
+        geojson_obj = self.geojson
+        
+        # --- Paso 1: normalizar expresión ---
+        expr = filtro_sql.strip()
+
+        # Reemplazar operadores lógicos SQL por Python
+        expr = re.sub(r"\bAND\b", "and", expr, flags=re.IGNORECASE)
+        expr = re.sub(r"\bOR\b", "or", expr, flags=re.IGNORECASE)
+        expr = re.sub(r"\bNOT\b", "not", expr, flags=re.IGNORECASE)
+
+        # Reemplazar '=' por '==' excepto en >= o <=
+        expr = re.sub(r"(?<![<>!])=(?!=)", "==", expr)
+
+        # --- Paso 2: reemplazar campos por props['campo'] ---
+        # Detectar palabras que podrían ser campos
+        palabras = set(re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", expr))
+        reservadas = {"and","or","not","True","False","None"}
+        campos = palabras - reservadas
+
+        for campo in campos:
+            expr = re.sub(rf"\b{campo}\b", f"props.get('{campo}')", expr)
+
+        # --- Paso 3: evaluar expresión sobre cada feature ---
+        filtradas = []
+        for feat in geojson_obj["features"]:
+            props = feat["properties"]
+
+            # Convertir valores numéricos si es posible
+            props_eval = {}
+            for k, v in props.items():
+                try:
+                    props_eval[k] = float(v)
+                except (ValueError, TypeError):
+                    props_eval[k] = v
+
+            # Evaluar expresión
+            try:
+                if eval(expr, {"props": props_eval}):
+                    filtradas.append(feat)
+            except Exception:
+                continue
+
+        salida = copy.deepcopy(geojson_obj)
+        salida["features"] = filtradas
+        self.geojson = salida
+        return salida
+
+    def ordenar_por(self, campo, orden="asc"):
+        if not hasattr(self, "geojson") or self.geojson is None:
+            raise Exception("Primero debes cargar un geojson en self.geojson")
+
+        geojson_obj = self.geojson
+        geojson_obj["features"] = sorted(
+            geojson_obj["features"],
+            key=lambda f: (
+                f["properties"].get(campo) is None,   # False < True → nulos primero
+                str(f["properties"].get(campo, ""))   # valor normal convertido a str
+            ),
+            reverse=(orden == "desc"),
+        )
+        self.geojson = geojson_obj
+        return geojson_obj
+
+    def offset(self, offsetValue=0):
+        """
+        Devuelve un GeoJSON con los features de self.geojson, pero comenzando
+        desde el offsetValue-ésimo (inclusivo) Si no se especifica offsetValue, se utiliza el valor de
+        offsetValue.
+        """
+        if not hasattr(self, "geojson") or self.geojson is None:
+            raise Exception("Primero debes cargar un geojson en self.geojson")
+
+        geojson_obj = self.geojson
+        geojson_obj["features"] = geojson_obj["features"][offsetValue:]
+        self.geojson = geojson_obj
+        return geojson_obj
+    
+    def limit(self,limitValue):
+        if not hasattr(self, "geojson") or self.geojson is None:
+            raise Exception("Primero debes cargar un geojson en self.geojson")
+
+        geojson_obj = self.geojson
+        geojson_obj["features"] = geojson_obj["features"][:limitValue]
+        self.geojson = geojson_obj
+        return geojson_obj
+
+    def obtenerAtributos(self, listaAtributos):
+        if not hasattr(self, "geojson") or self.geojson is None:
+            raise Exception("Primero debes cargar un geojson en self.geojson")
+
+        geojson_obj = self.geojson
+        geojson_obj["features"] = [
+            {k: v for k, v in f["properties"].items() if k in listaAtributos}
+            for f in geojson_obj["features"]
+        ]
+        self.geojson = geojson_obj
+        return geojson_obj
+
+    def borrar_geometria(self):
+        if not hasattr(self, "geojson") or self.geojson is None:
+            raise Exception("Primero debes cargar un geojson en self.geojson")
+
+        geojson_obj = self.geojson
+        geojson_obj["features"] = [
+            {k: v for k, v in f["properties"].items()}
+            for f in geojson_obj["features"]
+        ]
+        self.geojson = geojson_obj
+        return geojson_obj
 
 class FuenteDatosSonoff(infoSonoff,geojsonQuery):
     """
@@ -510,7 +810,7 @@ class FuenteDatosSonoff(infoSonoff,geojsonQuery):
         self.jsonParams = jsonParams
         self.jsonDevices = jsonDevices
         self.capas = self.obtener_tipos()
-        self.porTipo = {}
+        self.porTipo = self.dividir_por_tipo()
 
     def leer(self, capa=None, datasetCompleto=False):
         """
@@ -581,7 +881,6 @@ class FuenteDatosSonoff(infoSonoff,geojsonQuery):
         self.geojson = geojson
         return geojson
     
-
 class FuenteDatosSonoff_SQLITE(infoSonoff,geojsonQuery):
     def __init__(self, ruta_json_params, ruta_SQLite_devices):
         super().__init__(ruta_json_params)
@@ -595,6 +894,11 @@ class FuenteDatosSonoff_SQLITE(infoSonoff,geojsonQuery):
         
         if not self.ruta_SQLite_devices:
             raise Exception('No se ha especificado la ruta del archivo SQLite')
+        
+        self.ruta_json_conex = ruta_json_params
+        self.jsonParams = jsonParams
+        self.capas = self.obtener_tipos_sqlite()
+        self.porTipo = {}
 
     def leer(self, capa=None, datasetCompleto=False):
         if not self.ruta_SQLite_devices:
@@ -694,8 +998,7 @@ class FuenteDatosSonoff_SQLITE(infoSonoff,geojsonQuery):
         conn.close()
         self.geojson = geojson
         return geojson
-
-    
+  
 class FuenteDatosSonoff_OGR(infoSonoff,FuenteDatosVector):
     """
     Clase para gestionar la lectura, consulta y exportación de ddatos provenientes de IoT Sonoff.
