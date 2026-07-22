@@ -1,0 +1,17 @@
+# Dependencias para ejecutar la suite de tests.
+#
+# Los tests están diseñados para saltarse limpiamente (skip) cuando falta una
+# dependencia opcional (GDAL, pycryptodome, etc.), de modo que la parte de
+# lógica pura y los tests con mocks corren siempre.
+
+pytest>=7.0
+
+# --- Opcionales (habilitan más tests si están instaladas) ---
+# GDAL/OGR: tests de FuenteDatosVector/Raster y procesos vectoriales
+# gdal
+# Cifrado del estado de dispositivos Sonoff
+# pycryptodome
+# Descubrimiento local de dispositivos Tuya
+# tinytuya
+# Descubrimiento mDNS de dispositivos Sonoff
+# zeroconf

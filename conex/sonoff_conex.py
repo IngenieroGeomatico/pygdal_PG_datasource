@@ -1,6 +1,7 @@
 # Python
 import os
 import re
+import ast
 import sys
 import json
 import hmac
@@ -8,18 +9,62 @@ import copy
 import base64
 import sqlite3
 import hashlib
+import operator
 import requests
 import datetime
 
+# Intenta importar GDAL/OGR y las dependencias IoT. El fallo se difiere hasta
+# que realmente se usen, de modo que importar este módulo (p. ej. para usar la
+# clase geojsonQuery, que es lógica pura) no aborte el proceso cuando faltan
+# GDAL/pycryptodome/zeroconf.
 try:
     from osgeo import ogr, osr, gdal
-except:
-    sys.exit('ERROR: cannot find GDAL/OGR modules')
+    _GDAL_IMPORT_ERROR = None
+except Exception as _exc:  # pragma: no cover - depende del entorno
+    ogr = osr = gdal = None
+    _GDAL_IMPORT_ERROR = _exc
 
-from .lib_sonoff.peticiones_sonoff import mDNS_todos, mDNS
-from .lib_sonoff.cripto_sonoff import decrypt
+try:
+    from .lib_sonoff.peticiones_sonoff import mDNS_todos, mDNS
+except Exception as _exc:  # pragma: no cover - depende del entorno
+    mDNS_todos = mDNS = None
+    _PETICIONES_IMPORT_ERROR = _exc
+else:
+    _PETICIONES_IMPORT_ERROR = None
+
+try:
+    from .lib_sonoff.cripto_sonoff import decrypt
+except Exception as _exc:  # pragma: no cover - depende del entorno
+    decrypt = None
+    _CRIPTO_IMPORT_ERROR = _exc
+else:
+    _CRIPTO_IMPORT_ERROR = None
 
 from .Vector_conex import FuenteDatosVector
+
+
+def _asegurar_gdal():
+    """Lanza un error claro si GDAL/OGR no está disponible."""
+    if _GDAL_IMPORT_ERROR is not None:
+        raise ImportError(
+            "GDAL/OGR (paquete 'osgeo') no está disponible."
+        ) from _GDAL_IMPORT_ERROR
+
+
+def _asegurar_peticiones():
+    """Lanza un error claro si las utilidades mDNS (zeroconf) no están disponibles."""
+    if _PETICIONES_IMPORT_ERROR is not None:
+        raise ImportError(
+            "Las utilidades mDNS (paquete 'zeroconf') no están disponibles."
+        ) from _PETICIONES_IMPORT_ERROR
+
+
+def _asegurar_cripto():
+    """Lanza un error claro si el módulo de cifrado (pycryptodome) no está disponible."""
+    if _CRIPTO_IMPORT_ERROR is not None:
+        raise ImportError(
+            "El módulo de cifrado (paquete 'pycryptodome') no está disponible."
+        ) from _CRIPTO_IMPORT_ERROR
 
 class infoSonoff:
     """
@@ -71,10 +116,7 @@ class infoSonoff:
 
         if not ruta_json_params:
             dir_base = os.path.dirname(os.path.abspath(__file__))
-            ruta_json_conex = os.path.join(dir_base, 'lib_sonoff/params_sonoff.json')
-            if not os.path.exists(ruta_json_conex):
-                with open(ruta_json_conex, 'w', encoding='utf-8') as f:
-                    json.dump(templateJSON, f, ensure_ascii=False, indent=4)
+            ruta_json_params = os.path.join(dir_base, 'lib_sonoff/params_sonoff.json')
 
         if not os.path.exists(ruta_json_params):
             with open(ruta_json_params, 'w', encoding='utf-8') as f:
@@ -177,7 +219,7 @@ class infoSonoff:
             return auth
 
     def refreshAT(self, auth: dict, app=2):
-        
+
         def headers() -> dict:
             return {
                 "Authorization": "Bearer " + auth["at"],
@@ -185,7 +227,7 @@ class infoSonoff:
                 "Content-Type": "application/json"
             }
 
-        appid, appsecret = APP[app]
+        appid, appsecret = self.APP[app]
 
         r = requests.post(
             self.region['Europe']+ "/v2/user/refresh",
@@ -207,7 +249,7 @@ class infoSonoff:
                 "X-CK-Appid": appid
                 }
 
-        appid, appsecret = APP[app]
+        appid, appsecret = self.APP[app]
 
         r = requests.delete(
             self.region['Europe']+ "/v2/user/logout",
@@ -290,6 +332,8 @@ class infoSonoff:
         return jsonDevices
 
     def get_state_devices(self, idDevice=None):
+        _asegurar_peticiones()
+        _asegurar_cripto()
         if not self.jsonDevices:
             raise Exception('Se tiene que lanzar primero get_devices() para obtener los dispositivos')
         
@@ -665,17 +709,73 @@ class geojsonQuery:
 
         return self.geojson
     
+    # Operadores permitidos en el evaluador seguro de filtros SQL.
+    _OPERADORES_COMPARACION = {
+        ast.Eq: operator.eq,
+        ast.NotEq: operator.ne,
+        ast.Gt: operator.gt,
+        ast.GtE: operator.ge,
+        ast.Lt: operator.lt,
+        ast.LtE: operator.le,
+    }
+
+    @classmethod
+    def _eval_nodo_filtro(cls, nodo, props):
+        """
+        Evalúa de forma segura un nodo del AST de un filtro SQL-like.
+
+        Solo se permiten expresiones booleanas (and/or/not), comparaciones,
+        literales (números, cadenas, True/False/None) y nombres de campo (que
+        se resuelven contra ``props``). Cualquier otro tipo de nodo (llamadas a
+        funciones, atributos, imports, etc.) provoca ``ValueError``, lo que
+        elimina el riesgo de ejecución de código arbitrario del antiguo ``eval``.
+        """
+        # Python <3.8 usaba ast.Num/ast.Str/ast.NameConstant; en 3.8+ es ast.Constant.
+        if isinstance(nodo, ast.Constant):
+            return nodo.value
+
+        if isinstance(nodo, ast.BoolOp):
+            valores = [cls._eval_nodo_filtro(v, props) for v in nodo.values]
+            if isinstance(nodo.op, ast.And):
+                return all(valores)
+            return any(valores)
+
+        if isinstance(nodo, ast.UnaryOp) and isinstance(nodo.op, ast.Not):
+            return not cls._eval_nodo_filtro(nodo.operand, props)
+
+        if isinstance(nodo, ast.Compare):
+            izquierda = cls._eval_nodo_filtro(nodo.left, props)
+            for op, comparador in zip(nodo.ops, nodo.comparators):
+                tipo_op = type(op)
+                if tipo_op not in cls._OPERADORES_COMPARACION:
+                    raise ValueError(f"Operador no permitido: {tipo_op.__name__}")
+                derecha = cls._eval_nodo_filtro(comparador, props)
+                if not cls._OPERADORES_COMPARACION[tipo_op](izquierda, derecha):
+                    return False
+                izquierda = derecha
+            return True
+
+        if isinstance(nodo, ast.Name):
+            # Un nombre representa un campo de las propiedades.
+            return props.get(nodo.id)
+
+        raise ValueError(f"Expresión no permitida: {type(nodo).__name__}")
+
     def aplicar_filtro_sql(self, filtro_sql):
         """
         Aplica un filtro SQL-like a un GeoJSON (dict en memoria) sin librerías externas.
         Soporta: =, >, <, >=, <=, AND, OR, NOT y paréntesis.
         Detecta automáticamente números y strings (comillas simples o dobles opcionales).
+
+        La expresión se evalúa mediante un intérprete AST con lista blanca de
+        nodos, por lo que NO se ejecuta código arbitrario (a diferencia del
+        antiguo ``eval``).
         """
         if not hasattr(self, "geojson") or self.geojson is None:
             raise Exception("Primero debes cargar un geojson en self.geojson")
         geojson_obj = self.geojson
-        
-        # --- Paso 1: normalizar expresión ---
+
+        # --- Paso 1: normalizar expresión a sintaxis Python ---
         expr = filtro_sql.strip()
 
         # Reemplazar operadores lógicos SQL por Python
@@ -683,22 +783,19 @@ class geojsonQuery:
         expr = re.sub(r"\bOR\b", "or", expr, flags=re.IGNORECASE)
         expr = re.sub(r"\bNOT\b", "not", expr, flags=re.IGNORECASE)
 
-        # Reemplazar '=' por '==' excepto en >= o <=
+        # Reemplazar '=' por '==' excepto en >= , <= o !=
         expr = re.sub(r"(?<![<>!])=(?!=)", "==", expr)
 
-        # --- Paso 2: reemplazar campos por props['campo'] ---
-        # Detectar palabras que podrían ser campos
-        palabras = set(re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", expr))
-        reservadas = {"and","or","not","True","False","None"}
-        campos = palabras - reservadas
-
-        for campo in campos:
-            expr = re.sub(rf"\b{campo}\b", f"props.get('{campo}')", expr)
+        # --- Paso 2: parsear a AST una sola vez ---
+        try:
+            arbol = ast.parse(expr, mode="eval")
+        except SyntaxError:
+            raise ValueError(f"Filtro SQL inválido: {filtro_sql!r}")
 
         # --- Paso 3: evaluar expresión sobre cada feature ---
         filtradas = []
         for feat in geojson_obj["features"]:
-            props = feat["properties"]
+            props = feat.get("properties", {})
 
             # Convertir valores numéricos si es posible
             props_eval = {}
@@ -708,9 +805,8 @@ class geojsonQuery:
                 except (ValueError, TypeError):
                     props_eval[k] = v
 
-            # Evaluar expresión
             try:
-                if eval(expr, {"props": props_eval}):
+                if self._eval_nodo_filtro(arbol.body, props_eval):
                     filtradas.append(feat)
             except Exception:
                 continue
@@ -1022,6 +1118,7 @@ class FuenteDatosSonoff_OGR(infoSonoff,FuenteDatosVector):
         Devuelve:
             out_ds (ogr.DataSource): dataset en memoria con geometrías construidas.
         """
+        _asegurar_gdal()
         # Abrir dataset SQLite de entrada
         ds = ogr.Open(self.ruta_sqlite)
         if ds is None:

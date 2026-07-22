@@ -7,12 +7,26 @@ import sys
 import json
 import zipfile
 
-# e intenta importar GDAL/OGR
+# Intenta importar GDAL/OGR. El fallo se difiere hasta que realmente se use
+# GDAL (ver _asegurar_gdal), de modo que importar este módulo no aborte el
+# proceso cuando GDAL no está instalado (p. ej. al ejecutar tests de lógica pura).
 try:
     from osgeo import ogr, osr, gdal
-except:
-    sys.exit('ERROR: cannot find GDAL/OGR modules')
-    
+    _GDAL_IMPORT_ERROR = None
+except Exception as _exc:  # pragma: no cover - depende del entorno
+    ogr = osr = gdal = None
+    _GDAL_IMPORT_ERROR = _exc
+
+
+def _asegurar_gdal():
+    """Lanza un error claro si GDAL/OGR no está disponible."""
+    if _GDAL_IMPORT_ERROR is not None:
+        raise ImportError(
+            "GDAL/OGR (paquete 'osgeo') no está disponible. "
+            "Instálalo para usar FuenteDatosVector."
+        ) from _GDAL_IMPORT_ERROR
+
+
 class FuenteDatosVector:
     """
     Clase para gestionar la lectura, consulta y exportación de datos vectoriales usando GDAL/OGR.
@@ -34,6 +48,7 @@ class FuenteDatosVector:
         Comprueba la instalación de GDAL/OGR y muestra los drivers vectoriales y ráster disponibles.
         Útil para diagnóstico del entorno.
         """
+        _asegurar_gdal()
         version_num = int(gdal.VersionInfo('VERSION_NUM'))
 
         print('Versión de GDAL/OGR: ', version_num)
@@ -136,6 +151,7 @@ class FuenteDatosVector:
         ogr.DataSource
             Objeto datasource de OGR con la capa leída.
         """
+        _asegurar_gdal()
 
         ogr.UseExceptions()
 
@@ -239,7 +255,7 @@ class FuenteDatosVector:
             return outDataSource
 
         else:
-            raise('Valor de entrada no permitido')  
+            raise Exception('Valor de entrada no permitido')
 
     def exportar(self, capa = None, EPSG_Salida=None, outputFormat='application/json', ID=None):
         """

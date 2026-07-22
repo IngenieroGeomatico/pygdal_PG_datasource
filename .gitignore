@@ -1,5 +1,19 @@
-# Archivos propios
+# === Archivos con credenciales / estado sensible (NUNCA versionar) ===
+# Parámetros de conexión y estado de dispositivos IoT (contienen tokens,
+# contraseñas WiFi, AccessSecret, devicekey, etc.)
 *sonoff.json
+*tuyaSmartLife.json
+params_*.json
+devices_*.json
+# Bases de datos locales de dispositivos / estado
+*.sqlite
+*.sqlite3
+# Configuración de conexión a PostgreSQL
+PGconex.json
+conex/PGconex.json
+# Directorios de datos de prueba con credenciales
+tests/files/
+test/files/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

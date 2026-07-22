@@ -14,14 +14,32 @@ import requests
 import datetime
 from urllib.parse import quote
 
+# Import diferido de GDAL/OGR y del descubrimiento local (tinytuya), para que
+# importar este módulo no aborte el proceso cuando faltan esas dependencias.
 try:
     from osgeo import ogr, osr, gdal
-except:
-    sys.exit('ERROR: cannot find GDAL/OGR modules')
+    _GDAL_IMPORT_ERROR = None
+except Exception as _exc:  # pragma: no cover - depende del entorno
+    ogr = osr = gdal = None
+    _GDAL_IMPORT_ERROR = _exc
 
-from .lib_tuyaSmartLife.peticiones_TuyaSmartLife import find_all_devices
+try:
+    from .lib_tuyaSmartLife.peticiones_TuyaSmartLife import find_all_devices
+except Exception as _exc:  # pragma: no cover - depende del entorno
+    find_all_devices = None
+    _TINYTUYA_IMPORT_ERROR = _exc
+else:
+    _TINYTUYA_IMPORT_ERROR = None
 
 from .Vector_conex import FuenteDatosVector
+
+
+def _asegurar_tinytuya():
+    """Lanza un error claro si el descubrimiento local (tinytuya) no está disponible."""
+    if _TINYTUYA_IMPORT_ERROR is not None:
+        raise ImportError(
+            "El descubrimiento local de dispositivos (paquete 'tinytuya') no está disponible."
+        ) from _TINYTUYA_IMPORT_ERROR
 
 class infoTuyaSmartLife:
  
@@ -66,11 +84,8 @@ class infoTuyaSmartLife:
 
         if not ruta_json_params:
             dir_base = os.path.dirname(os.path.abspath(__file__))
-            ruta_json_conex = os.path.join(dir_base, 'lib_infoTuyaSmartLife/params_infoTuyaSmartLife.json')
-            if not os.path.exists(ruta_json_conex):
-                with open(ruta_json_conex, 'w', encoding='utf-8') as f:
-                    json.dump(templateJSON, f, ensure_ascii=False, indent=4)
-        
+            ruta_json_params = os.path.join(dir_base, 'lib_tuyaSmartLife/params_tuyaSmartLife.json')
+
         if not os.path.exists(ruta_json_params):
             with open(ruta_json_params, 'w', encoding='utf-8') as f:
                 json.dump(templateJSON, f, ensure_ascii=False, indent=4)
@@ -250,6 +265,7 @@ class infoTuyaSmartLife:
 
         devices = self.call_v2_api("/v2.0/cloud/thing/device", params=params)["result"]
 
+        _asegurar_tinytuya()
         localDevices = find_all_devices(scan_tcp=True, scantime=120)
 
         for device in devices:

@@ -79,7 +79,22 @@ class ConexPG:
         return f"archivo de conexión: {self.conexFile}"
 
     # Función que comprueba si la conexión se hace satisfactoriamente
-    def conex2PG(self, check = False):
+    def conex2PG(self, check=False):
+        """
+        Establece la conexión con PostgreSQL.
+
+        Parámetros
+        ----------
+        check : bool, opcional
+            Si es True, abre y cierra la conexión (modo verificación) y devuelve
+            un mensaje de confirmación. Si es False (por defecto), devuelve el
+            objeto ``connection`` abierto para su uso posterior.
+
+        Retorna
+        -------
+        psycopg2.extensions.connection o str
+            Objeto de conexión (check=False) o mensaje de confirmación (check=True).
+        """
 
         db_params = {
             "host": self.conexJSON["IP"],
@@ -92,41 +107,36 @@ class ConexPG:
         try:
             # Establishing a connection to the database
             connection = psycopg2.connect(**db_params)
-            # Creating a cursor object to interact with the database
-            cursor = connection.cursor()
-            # Performing database operations here...
-
         except (Exception, psycopg2.Error) as error:
             print(f"Error connecting to the database: {error}")
             raise Exception(f"Error connecting to the database: {error}")
 
-        finally:
-            if connection:
-                if check == True:
-                    cursor.close()
-                    connection.close()
-                    print('')
-                    print('--------------------------------')
-                    print("[v]  Database connection opened and closed.")
-                    print('--------------------------------')
-                    print('')
-                    return "[v]  Database connection opened and closed."
-                else:
-                    return  connection
+        if check:
+            # Modo verificación: comprobamos que se puede abrir un cursor y cerramos.
+            connection.close()
+            print('')
+            print('--------------------------------')
+            print("[v]  Database connection opened and closed.")
+            print('--------------------------------')
+            print('')
+            return "[v]  Database connection opened and closed."
+
+        return connection
 
     # Función para mandar las sentencias SQL
-    def queryPG(self,query):
+    def queryPG(self, query):
 
         # Se realiza la conexión para almacenar el contenido de las tablas en objetos python
-        connection = self.conex2PG(self)
-        cursor = connection.cursor()
-
-        # Ejecuta la sentencia SQL
-        cursor.execute(query)
-        returnQuery = cursor.fetchall()
-        connection.commit()
-        cursor.close()
-        connection.close()
+        connection = self.conex2PG()
+        try:
+            cursor = connection.cursor()
+            # Ejecuta la sentencia SQL
+            cursor.execute(query)
+            returnQuery = cursor.fetchall()
+            connection.commit()
+            cursor.close()
+        finally:
+            connection.close()
 
         return returnQuery
 

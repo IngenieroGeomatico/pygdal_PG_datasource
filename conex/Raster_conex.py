@@ -7,12 +7,26 @@ import uuid
 import json
 import zipfile
 
-# e intenta importar GDAL/OGR
+# Intenta importar GDAL/OGR. El fallo se difiere hasta que realmente se use
+# GDAL (ver _asegurar_gdal), de modo que importar este módulo no aborte el
+# proceso cuando GDAL no está instalado.
 try:
     from osgeo import ogr, osr, gdal
-except:
-    sys.exit('ERROR: cannot find GDAL/OGR modules')
-    
+    _GDAL_IMPORT_ERROR = None
+except Exception as _exc:  # pragma: no cover - depende del entorno
+    ogr = osr = gdal = None
+    _GDAL_IMPORT_ERROR = _exc
+
+
+def _asegurar_gdal():
+    """Lanza un error claro si GDAL/OGR no está disponible."""
+    if _GDAL_IMPORT_ERROR is not None:
+        raise ImportError(
+            "GDAL/OGR (paquete 'osgeo') no está disponible. "
+            "Instálalo para usar FuenteDatosRaster."
+        ) from _GDAL_IMPORT_ERROR
+
+
 class FuenteDatosRaster:
     """
     Clase para gestionar la lectura, consulta y exportación de datos ráster usando GDAL.
@@ -37,6 +51,7 @@ class FuenteDatosRaster:
         Comprueba la instalación de GDAL/OGR y muestra los drivers vectoriales y ráster disponibles.
         Útil para diagnóstico del entorno.
         """
+        _asegurar_gdal()
         version_num = int(gdal.VersionInfo('VERSION_NUM'))
 
         print('Versión de GDAL/OGR: ', version_num)
@@ -136,6 +151,7 @@ class FuenteDatosRaster:
         gdal.Dataset
             Objeto dataset de GDAL con el ráster leído.
         """
+        _asegurar_gdal()
         gdal.UseExceptions()
 
         if banda:
