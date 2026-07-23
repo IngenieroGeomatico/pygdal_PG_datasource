@@ -302,10 +302,13 @@ class FuenteDatosVector:
                 "features": []
             }
 
+            necesita_reproyeccion = (
+                srs_original is not None
+                and not srs.IsSame(srs_original)
+                and srs_original.GetAttrValue("AUTHORITY", 1) != srs.GetAttrValue("AUTHORITY", 1)
+            )
 
-            if (not srs.IsSame(srs_original) and 
-                srs_original.GetAttrValue("AUTHORITY", 1)!=srs.GetAttrValue("AUTHORITY", 1)):
-
+            if necesita_reproyeccion:
                 transform = osr.CoordinateTransformation(srs_original, srs)
                 for feat in capa:
                     geom = feat.GetGeometryRef()
