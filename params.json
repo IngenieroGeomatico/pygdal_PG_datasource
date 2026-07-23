@@ -1,0 +1,18 @@
+{
+    "router": {
+        "IP": "",
+        "IP_2": "",
+        "SSID": "",
+        "pass": "",
+        "pass_R": ""
+    },
+    "tuyaSmartLife": {
+        "user_": "",
+        "password": "",
+        "url": "https://developer.tuya.com/",
+        "user": {
+            "AccessID": "",
+            "AccessSecret": ""
+        }
+    }
+}

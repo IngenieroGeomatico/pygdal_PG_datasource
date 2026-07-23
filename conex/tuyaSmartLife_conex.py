@@ -32,7 +32,7 @@ else:
     _TINYTUYA_IMPORT_ERROR = None
 
 from .Vector_conex import FuenteDatosVector
-from .sonoff_conex import geojsonQuery
+from .sonoff_conex import geojsonQuery, _asegurar_gdal
 
 
 def _asegurar_tinytuya():

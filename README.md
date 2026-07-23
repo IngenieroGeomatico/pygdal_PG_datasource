@@ -393,7 +393,6 @@ La librería hace uso intensivo del sistema de archivos virtual de GDAL:
 
 **Limitaciones conocidas:**
 - El descubrimiento local (mDNS/zeroconf) de dispositivos Sonoff y Tuya requiere dependencias opcionales (`zeroconf`, `tinytuya`).
-- No hay tests específicos para las nuevas clases de exportación Tuya (`FuenteDatosTuya`, `FuenteDatosTuya_SQLITE`, `FuenteDatosTuya_OGR`).
 
 ---
 
