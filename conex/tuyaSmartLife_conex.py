@@ -301,27 +301,141 @@ class infoTuyaSmartLife:
     
 
     def get_state_devices(self, idDevice=None):
-        return
-    
-    def dividir_por_tipo_y_guardar(self):
-        return
+        if not self.jsonDevices:
+            raise Exception('Ejecuta get_devices() primero para obtener los dispositivos')
+        if idDevice:
+            if idDevice not in self.jsonDevices:
+                raise Exception(f"Dispositivo '{idDevice}' no encontrado")
+            result = self.call_v2_api(f"/v1.0/devices/{idDevice}/status")
+            self.jsonDevices[idDevice]['state'] = result.get('result', [])
+            return self.jsonDevices[idDevice]
+        else:
+            for device_id in self.jsonDevices:
+                result = self.call_v2_api(f"/v1.0/devices/{device_id}/status")
+                self.jsonDevices[device_id]['state'] = result.get('result', [])
+            return self.jsonDevices
 
-    def dividir_por_tipo(self):
-        return
-    
-    def dividir_por_tipo_sqlite(self):
-        return
+    def dividir_por_tipo(self, tipo=None):
+        if not self.jsonDevices:
+            raise Exception('Ejecuta get_devices() primero para obtener los dispositivos')
+        por_tipo = {}
+        for device_id, device_data in self.jsonDevices.items():
+            raw = device_data.get('tuyaSmartLife', {})
+            category = raw.get('category', 'UNKNOWN')
+            if tipo and category != tipo:
+                continue
+            if category not in por_tipo:
+                por_tipo[category] = {}
+            por_tipo[category][device_id] = device_data
+        return por_tipo
+
+    def dividir_por_tipo_y_guardar(self):
+        if not self.jsonDevices:
+            raise Exception('Ejecuta get_devices() primero para obtener los dispositivos')
+        if not self.ruta_json_devices:
+            dir_base = os.path.dirname(os.path.abspath(__file__))
+            self.ruta_json_devices = os.path.join(dir_base, 'lib_tuyaSmartLife/devices_tuyaSmartLife.json')
+        tipos = []
+        for categoria, dispositivos in self.dividir_por_tipo().items():
+            tipos.append(categoria)
+            nombre_archivo = self.ruta_json_devices.replace('devices', categoria)
+            with open(nombre_archivo, 'w', encoding='utf-8') as f:
+                json.dump(dispositivos, f, ensure_ascii=False, indent=2)
+        return tipos
+
+    def dividir_por_tipo_sqlite(self, tipo=None):
+        if not hasattr(self, 'ruta_SQLite_devices') or not self.ruta_SQLite_devices:
+            raise Exception("Define self.ruta_SQLite_devices con la ruta al archivo SQLite")
+        conn = sqlite3.connect(self.ruta_SQLite_devices)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tablas = [row[0] for row in cursor.fetchall()]
+        if not tablas:
+            conn.close()
+            raise Exception("El archivo SQLite no contiene tablas")
+        por_tipo = {}
+        for tabla in tablas:
+            if tipo and tabla != tipo:
+                continue
+            cursor.execute(f"SELECT * FROM {tabla};")
+            registros = cursor.fetchall()
+            columnas = [desc[0] for desc in cursor.description]
+            por_tipo[tabla] = [dict(zip(columnas, row)) for row in registros]
+        conn.close()
+        return por_tipo
 
     def obtener_tipos(self):
-        return
-    
+        if not self.jsonDevices:
+            raise Exception('Ejecuta get_devices() primero para obtener los dispositivos')
+        categorias = set()
+        for device_data in self.jsonDevices.values():
+            raw = device_data.get('tuyaSmartLife', {})
+            categorias.add(raw.get('category', 'UNKNOWN'))
+        return sorted(categorias)
+
     def obtener_tipos_sqlite(self):
-        return
-    
-    def jsonDevices2SQLite(self):
-        return
-    
+        if not hasattr(self, 'ruta_SQLite_devices') or not self.ruta_SQLite_devices:
+            raise Exception("Define self.ruta_SQLite_devices con la ruta al archivo SQLite")
+        conn = sqlite3.connect(self.ruta_SQLite_devices)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tablas = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        if not tablas:
+            raise Exception("El archivo SQLite no contiene tablas")
+        return tablas
+
+    def jsonDevices2SQLite(self, ruta_SQLite_devices=None):
+        if not ruta_SQLite_devices:
+            raise Exception('Especifica la ruta del archivo SQLite')
+        if not self.jsonDevices:
+            raise Exception('Ejecuta get_devices() primero para obtener los dispositivos')
+        if os.path.exists(ruta_SQLite_devices):
+            os.remove(ruta_SQLite_devices)
+        conn = sqlite3.connect(ruta_SQLite_devices)
+        c = conn.cursor()
+        por_tipo = self.dividir_por_tipo()
+        for categoria, dispositivos in por_tipo.items():
+            c.execute(f'''
+                CREATE TABLE IF NOT EXISTS {categoria} (
+                    id TEXT PRIMARY KEY,
+                    extra TEXT,
+                    tuyaSmartLife TEXT,
+                    state TEXT
+                )
+            ''')
+            for device_id, device_data in dispositivos.items():
+                extra = json.dumps(device_data.get('extra', {}))
+                raw = json.dumps(device_data.get('tuyaSmartLife', {}))
+                state = json.dumps(device_data.get('state', []))
+                c.execute(f'''
+                    INSERT OR REPLACE INTO {categoria} (id, extra, tuyaSmartLife, state)
+                    VALUES (?, ?, ?, ?)
+                ''', (device_id, extra, raw, state))
+        conn.commit()
+        conn.close()
+        self.ruta_SQLite_devices = ruta_SQLite_devices
+        return ruta_SQLite_devices
+
     def actualizar_sqlite(self):
-        return
+        if not self.ruta_SQLite_devices:
+            raise Exception('Ejecuta jsonDevices2SQLite() primero para crear el SQLite')
+        if not self.jsonDevices:
+            raise Exception('Ejecuta get_devices() primero para obtener los dispositivos')
+        conn = sqlite3.connect(self.ruta_SQLite_devices)
+        c = conn.cursor()
+        por_tipo = self.dividir_por_tipo()
+        for categoria, dispositivos in por_tipo.items():
+            for device_id, device_data in dispositivos.items():
+                extra = json.dumps(device_data.get('extra', {}))
+                raw = json.dumps(device_data.get('tuyaSmartLife', {}))
+                state = json.dumps(device_data.get('state', []))
+                c.execute(f'''
+                    INSERT OR REPLACE INTO {categoria} (id, extra, tuyaSmartLife, state)
+                    VALUES (?, ?, ?, ?)
+                ''', (device_id, extra, raw, state))
+        conn.commit()
+        conn.close()
+        return self.ruta_SQLite_devices
     
 

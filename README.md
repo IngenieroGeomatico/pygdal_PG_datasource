@@ -24,14 +24,17 @@ pygdal_PG_datasource/
 │   ├── Vector_conex.py             # Lectura, consulta y exportación vectorial (OGR)
 │   ├── Raster_conex.py             # Lectura y exportación ráster (GDAL)
 │   ├── sonoff_conex.py             # Conector IoT Sonoff/eWeLink → GeoJSON/OGR/SQLite
-│   ├── tuyaSmartLife_conex.py      # Conector IoT Tuya Smart Life (en desarrollo)
+│   ├── tuyaSmartLife_conex.py      # Conector IoT Tuya Smart Life
+│   ├── __init__.py                 # Convierte el directorio en paquete Python
 │   ├── lib_sonoff/
 │   │   ├── peticiones_sonoff.py    # Descubrimiento mDNS (zeroconf) de dispositivos
 │   │   └── cripto_sonoff.py        # Cifrado/descifrado AES-CBC del estado (eWeLink)
 │   └── lib_tuyaSmartLife/
 │       └── peticiones_TuyaSmartLife.py  # Descubrimiento local (tinytuya)
 ├── procesos/
+│   ├── __init__.py
 │   └── vector/
+│       ├── __init__.py
 │       ├── geoprocesos.py          # Geoprocesos OGR (buffers)
 │       └── tematicos.py            # Cálculos temáticos OGR (áreas)
 ├── tests/                          # Suite de tests (pytest)
@@ -57,7 +60,7 @@ pygdal_PG_datasource/
 └── README.md
 ```
 
-> **Nota:** el código de la librería vive en `conex/` (no en un paquete `lib/`). Los ejemplos de importación de este README usan `conex.*`.
+> **Nota:** el código de la librería vive en `conex/` (no en un paquete `lib/`). Los ejemplos de importación de este README usan `conex.*`. El directorio `conex/` ya contiene `__init__.py` y puede importarse directamente.
 
 ---
 
@@ -96,19 +99,14 @@ pip install tinytuya
 
 ## Instalación
 
-Actualmente la librería se usa por copia directa del repositorio:
-
 ```bash
 git clone https://github.com/IngenieroGeomatico/pygdal_PG_datasource.git
 cd pygdal_PG_datasource
 ```
 
-No requiere `pip install`. Para usar los módulos desde tu proyecto, añade la raíz del repositorio al `sys.path` e importa desde el paquete `conex`:
+El directorio `conex/` es un paquete Python (contiene `__init__.py`). Puedes importar los módulos directamente desde la raíz del repositorio:
 
 ```python
-import sys
-sys.path.insert(0, '/ruta/a/pygdal_PG_datasource')
-
 from conex.PG_conex import ConexPG
 from conex.Vector_conex import FuenteDatosVector
 from conex.Raster_conex import FuenteDatosRaster
@@ -231,7 +229,7 @@ Exponen dispositivos IoT como capas geográficas. Requieren dependencias adicion
 
 `geojsonQuery` es un mini-motor de consultas sobre GeoJSON en memoria: `MRE_datos` (bbox), `aplicar_filtro_sql` (filtro SQL-like evaluado de forma **segura** mediante AST, sin `eval`), `ordenar_por`, `limit`, `offset`, `crear_ID`, `obtener_objeto_porID`, `obtenerAtributos`, `borrar_geometria`.
 
-**Tuya Smart Life** — `infoTuyaSmartLife` firma peticiones a Tuya Cloud (HMAC-SHA256) y descubre dispositivos locales con `tinytuya`. Módulo **en desarrollo**.
+**Tuya Smart Life** — `infoTuyaSmartLife` firma peticiones a Tuya Cloud (HMAC-SHA256), descubre dispositivos locales con `tinytuya`, y permite agruparlos por tipo, guardarlos en SQLite o exportarlos a JSON.
 
 ---
 
@@ -384,8 +382,8 @@ La librería hace uso intensivo del sistema de archivos virtual de GDAL:
 > **Alpha** — La API puede cambiar. Actualmente en fase de refactorización: los módulos originales `Imp_Capas.py` / `Exp_Capas.py` han sido reemplazados por el diseño actual orientado a fuentes de datos (`FuenteDatosVector`, `FuenteDatosRaster`), y se han añadido conectores IoT (`sonoff_conex`, `tuyaSmartLife_conex`).
 
 **Limitaciones conocidas:**
-- El conector **Tuya Smart Life** está incompleto (varios métodos de agrupación aún no implementados).
-- El directorio `conex/` no contiene `__init__.py`, por lo que no es un paquete Python formal (los ejemplos ajustan `sys.path`).
+- El conector **Tuya Smart Life** aún no dispone de métodos de exportación geográfica (GeoJSON/OGR/SQLite) equivalentes a los de Sonoff; solo expone los datos brutos.
+- No hay `pyproject.toml` / `setup.py` para instalación formal con `pip install`.
 
 ---
 
