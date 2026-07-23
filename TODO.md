@@ -19,6 +19,10 @@
 - [ ] Reemplazar `print()` por el módulo `logging`
 - [ ] Añadir `pyproject.toml` para instalación con `pip install .`
 
+## 🚀 Nuevas funcionalidades
+
+- [ ] Añadir a `infoTuyaSmartLife` métodos de exportación geográfica (GeoJSON/OGR/SQLite) similares a los de Sonoff
+
 ## 🏷️ Nombres
 
 - [ ] Unificar idioma (español → inglés): `leer`→`read`, `exportar`→`export`, `obtener_capas`→`get_layers`, etc.
