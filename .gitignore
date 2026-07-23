@@ -3,7 +3,7 @@
 # contraseñas WiFi, AccessSecret, devicekey, etc.)
 *sonoff.json
 *tuyaSmartLife.json
-params_*.json
+params*.json
 devices_*.json
 # Bases de datos locales de dispositivos / estado
 *.sqlite
