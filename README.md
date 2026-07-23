@@ -391,9 +391,6 @@ La librería hace uso intensivo del sistema de archivos virtual de GDAL:
 
 > **Alpha** — La API puede cambiar. Actualmente en fase de refactorización: los módulos originales `Imp_Capas.py` / `Exp_Capas.py` han sido reemplazados por el diseño actual orientado a fuentes de datos (`FuenteDatosVector`, `FuenteDatosRaster`), y se han añadido conectores IoT (`sonoff_conex`, `tuyaSmartLife_conex`).
 
-**Limitaciones conocidas:**
-- El descubrimiento local (mDNS/zeroconf) de dispositivos Sonoff y Tuya requiere dependencias opcionales (`zeroconf`, `tinytuya`).
-
 ---
 
 ## Tests
