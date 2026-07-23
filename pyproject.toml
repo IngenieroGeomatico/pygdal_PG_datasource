@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pygdal_PG_datasource"
+version = "0.1.0"
+description = "Acceso unificado a datos geoespaciales vectoriales y ráster vía GDAL/OGR, con conexión a PostgreSQL/PostGIS y conectores IoT"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+dependencies = [
+    "psycopg2-binary",
+]
+
+[project.optional-dependencies]
+gdal = []
+sonoff = ["requests", "zeroconf", "pycryptodome"]
+tuya = ["tinytuya"]
+all = ["requests", "zeroconf", "pycryptodome", "tinytuya"]
+
+[tool.setuptools.packages.find]
+include = ["conex*", "procesos*"]

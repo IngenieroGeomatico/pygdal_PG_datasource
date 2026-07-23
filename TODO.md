@@ -17,11 +17,11 @@
 - [ ] Dividir `Vector_conex.exportar` (~230 líneas) en métodos más pequeños
 - [ ] Dividir `Vector_conex.leer` separando detección de tipo (WKT/OGR), prefijos VSI y copia a memoria
 - [ ] Reemplazar `print()` por el módulo `logging`
-- [ ] Añadir `pyproject.toml` para instalación con `pip install .`
+- [x] Añadir `pyproject.toml` para instalación con `pip install .`
 
 ## 🚀 Nuevas funcionalidades
 
-- [ ] Añadir a `infoTuyaSmartLife` métodos de exportación geográfica (GeoJSON/OGR/SQLite) similares a los de Sonoff
+- [x] Añadir a `infoTuyaSmartLife` métodos de exportación geográfica (GeoJSON/OGR/SQLite) similares a los de Sonoff
 
 ## 🏷️ Nombres
 

@@ -32,6 +32,7 @@ else:
     _TINYTUYA_IMPORT_ERROR = None
 
 from .Vector_conex import FuenteDatosVector
+from .sonoff_conex import geojsonQuery
 
 
 def _asegurar_tinytuya():
@@ -437,5 +438,222 @@ class infoTuyaSmartLife:
         conn.commit()
         conn.close()
         return self.ruta_SQLite_devices
-    
 
+
+class FuenteDatosTuya(infoTuyaSmartLife, geojsonQuery):
+    def __init__(self, ruta_json_params, ruta_json_devices):
+        infoTuyaSmartLife.__init__(self, ruta_json_params)
+        with open(ruta_json_devices, 'r', encoding='utf-8') as f:
+            try:
+                jsonDevices = json.load(f)
+            except json.JSONDecodeError:
+                raise Exception(f"json incorrecto: {ruta_json_devices}")
+        self.ruta_json_devices = ruta_json_devices
+        self.jsonDevices = jsonDevices
+        self.capas = self.obtener_tipos()
+        self.porTipo = self.dividir_por_tipo()
+
+    def leer(self, capa=None, datasetCompleto=False):
+        if datasetCompleto and capa is None:
+            self.porTipo = self.dividir_por_tipo()
+            return self.porTipo
+        elif capa is None:
+            capa = self.capas[0]
+            self.porTipo = self.dividir_por_tipo(tipo=capa)
+            return self.porTipo
+        else:
+            if isinstance(capa, int):
+                capa = self.capas[capa]
+            self.porTipo = self.dividir_por_tipo(tipo=capa)
+            return self.porTipo
+
+    def exportar_geojson(self, capa=None):
+        if not capa:
+            capa = next(iter(self.porTipo.keys()))
+        if isinstance(capa, int):
+            capa = self.capas[capa]
+        dispositivos = self.porTipo.get(capa, {})
+        features = []
+        for device_id, device in dispositivos.items():
+            extra = device.get('extra', {})
+            lon = extra.get('long')
+            lat = extra.get('lat')
+            if lon is None or lat is None:
+                continue
+            feature = {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [lon, lat]
+                },
+                "properties": {
+                    "id": device_id,
+                    "tuyaSmartLife": device.get('tuyaSmartLife', {}),
+                    "state": device.get('state', [])
+                }
+            }
+            features.append(feature)
+        geojson = {
+            "type": "FeatureCollection",
+            "features": features
+        }
+        self.geojson = geojson
+        return geojson
+
+
+class FuenteDatosTuya_SQLITE(infoTuyaSmartLife, geojsonQuery):
+    def __init__(self, ruta_json_params, ruta_SQLite_devices):
+        infoTuyaSmartLife.__init__(self, ruta_json_params)
+        self.ruta_SQLite_devices = ruta_SQLite_devices
+        if not self.ruta_SQLite_devices:
+            raise Exception('No se ha especificado la ruta del archivo SQLite')
+        self.capas = self.obtener_tipos_sqlite()
+        self.porTipo = {}
+
+    def leer(self, capa=None, datasetCompleto=False):
+        if not self.ruta_SQLite_devices:
+            raise Exception('No se ha especificado la ruta del archivo SQLite')
+        if not os.path.exists(self.ruta_SQLite_devices):
+            raise Exception(f'No se ha encontrado el archivo {self.ruta_SQLite_devices}')
+        conn = sqlite3.connect(self.ruta_SQLite_devices)
+        c = conn.cursor()
+        c.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tablas = c.fetchall()
+        self.capas = [tabla[0] for tabla in tablas]
+        self.porTipo = {tabla[0]: {} for tabla in tablas}
+        if capa is None:
+            for tabla in tablas:
+                if datasetCompleto:
+                    c.execute(f"SELECT * FROM {tabla[0]}")
+                    filas = c.fetchall()
+                    for fila in filas:
+                        self.porTipo[tabla[0]][fila[0]] = {
+                            "extra": json.loads(fila[1]),
+                            "tuyaSmartLife": json.loads(fila[2]),
+                            "state": json.loads(fila[3])
+                        }
+                else:
+                    c.execute(f"SELECT id FROM {tabla[0]}")
+                    ids = [fila[0] for fila in c.fetchall()]
+                    self.porTipo[tabla[0]] = ids
+        else:
+            if capa not in self.capas:
+                raise Exception(f'No existe la tabla {capa} en el archivo SQLite')
+            if datasetCompleto:
+                c.execute(f"SELECT * FROM {capa}")
+                filas = c.fetchall()
+                for fila in filas:
+                    self.porTipo[capa][fila[0]] = {
+                        "extra": json.loads(fila[1]),
+                        "tuyaSmartLife": json.loads(fila[2]),
+                        "state": json.loads(fila[3])
+                    }
+            else:
+                c.execute(f"SELECT id FROM {capa}")
+                ids = [fila[0] for fila in c.fetchall()]
+                self.porTipo[capa] = ids
+        conn.close()
+        return self.porTipo
+
+    def exportar_geojson(self, capa=None):
+        if not self.ruta_SQLite_devices:
+            raise Exception('No se ha especificado la ruta del archivo SQLite')
+        if not os.path.exists(self.ruta_SQLite_devices):
+            raise Exception(f'No se ha encontrado el archivo {self.ruta_SQLite_devices}')
+        conn = sqlite3.connect(self.ruta_SQLite_devices)
+        c = conn.cursor()
+        c.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tablas = c.fetchall()
+        self.capas = [tabla[0] for tabla in tablas]
+        if not capa:
+            capa = next(iter(self.capas))
+        if isinstance(capa, int):
+            capa = self.capas[capa]
+        if capa not in self.capas:
+            raise Exception(f'No existe la tabla {capa} en el archivo SQLite')
+        c.execute(f"SELECT * FROM {capa}")
+        filas = c.fetchall()
+        features = []
+        for fila in filas:
+            extra = json.loads(fila[1])
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [extra['long'], extra['lat']]
+                },
+                "properties": {
+                    "id": fila[0],
+                    "tuyaSmartLife": json.loads(fila[2]),
+                    "state": json.loads(fila[3])
+                }
+            })
+        geojson = {
+            "type": "FeatureCollection",
+            "features": features
+        }
+        conn.close()
+        self.geojson = geojson
+        return geojson
+
+
+class FuenteDatosTuya_OGR(infoTuyaSmartLife, FuenteDatosVector):
+    def __init__(self, ruta_json_params, ruta_SQLite_devices):
+        infoTuyaSmartLife.__init__(self, ruta_json_params)
+        FuenteDatosVector.__init__(self, ruta_SQLite_devices)
+        self.ruta_sqlite = ruta_SQLite_devices
+
+    def leer(self, capa=None, EPSG_Entrada=4326, datasetCompleto=False):
+        _asegurar_gdal()
+        ds = ogr.Open(self.ruta_sqlite)
+        if ds is None:
+            raise RuntimeError(f"No se pudo abrir la base de datos {self.ruta_sqlite}")
+        outdriver = ogr.GetDriverByName("MEMORY")
+        out_ds = outdriver.CreateDataSource("out_mem")
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(EPSG_Entrada)
+
+        def procesar_capa(in_layer, nombre_capa):
+            out_layer = out_ds.CreateLayer(nombre_capa, srs, ogr.wkbPoint)
+            in_defn = in_layer.GetLayerDefn()
+            for i in range(in_defn.GetFieldCount()):
+                out_layer.CreateField(in_defn.GetFieldDefn(i))
+            out_defn = out_layer.GetLayerDefn()
+            for in_feat in in_layer:
+                extra_raw = in_feat.GetField("extra")
+                extra_json = json.loads(extra_raw)
+                lon = float(extra_json.get("long"))
+                lat = float(extra_json.get("lat"))
+                if lon is None or lat is None:
+                    continue
+                geom = ogr.Geometry(ogr.wkbPoint)
+                geom.AddPoint(float(lon), float(lat))
+                out_feat = ogr.Feature(out_defn)
+                out_feat.SetGeometry(geom)
+                for i in range(out_defn.GetFieldCount()):
+                    out_feat.SetField(out_defn.GetFieldDefn(i).GetNameRef(), in_feat.GetField(i))
+                out_layer.CreateFeature(out_feat)
+                out_feat = None
+            in_layer.ResetReading()
+
+        if capa is not None:
+            try:
+                idx = int(capa)
+                in_layer = ds.GetLayerByIndex(idx)
+            except (ValueError, TypeError):
+                in_layer = ds.GetLayer(capa)
+            if in_layer is None:
+                raise Exception(f"No existe la capa '{capa}'")
+            procesar_capa(in_layer, in_layer.GetName())
+            self.multiLayers = False
+        elif datasetCompleto:
+            for i in range(ds.GetLayerCount()):
+                in_layer = ds.GetLayerByIndex(i)
+                procesar_capa(in_layer, in_layer.GetName())
+            self.multiLayers = True
+        else:
+            in_layer = ds.GetLayerByIndex(0)
+            procesar_capa(in_layer, in_layer.GetName())
+            self.multiLayers = False
+        self.datasource = out_ds
+        return out_ds
