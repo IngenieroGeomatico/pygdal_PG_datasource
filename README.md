@@ -39,7 +39,9 @@ pygdal_PG_datasource/
 │   ├── test_geojson_query.py       # Unit: consultas GeoJSON + seguridad filtro
 │   ├── test_pg_conex.py            # Unit: ConexPG (psycopg2 mockeado)
 │   ├── test_tuya_peticiones.py     # Unit: descubrimiento Tuya (tinytuya mockeado)
+│   ├── test_tuya_datos.py          # Unit: transformación datos Tuya
 │   ├── test_cripto_sonoff.py       # Unit: cifrado AES (requiere pycryptodome)
+│   ├── test_sonoff_sqlite.py       # Unit: Sonoff desde SQLite
 │   ├── test_vector_conex.py        # Unit: FuenteDatosVector (requiere GDAL)
 │   ├── test_procesos_vector.py     # Unit: buffers/áreas (requiere GDAL)
 │   └── integration/                # Tests de integración (recursos reales)
@@ -380,13 +382,6 @@ La librería hace uso intensivo del sistema de archivos virtual de GDAL:
 ### Estado del desarrollo
 
 > **Alpha** — La API puede cambiar. Actualmente en fase de refactorización: los módulos originales `Imp_Capas.py` / `Exp_Capas.py` han sido reemplazados por el diseño actual orientado a fuentes de datos (`FuenteDatosVector`, `FuenteDatosRaster`), y se han añadido conectores IoT (`sonoff_conex`, `tuyaSmartLife_conex`).
-
-**Correcciones recientes:**
-- `PG_conex.queryPG()` ya no pasa `self` a `conex2PG`; abre una conexión propia y libera los recursos con `try/finally`.
-- El descubrimiento Tuya expone `find_all_devices()` (usado por `get_devices`) y `discover_tuya_by_id_or_ip()` funciona correctamente.
-- `infoSonoff.refreshAT()`/`logout()` usan `self.APP` (antes referenciaban un global inexistente).
-- Los constructores de los conectores IoT resuelven correctamente la ruta por defecto cuando no se pasa `ruta_json_params`.
-- `geojsonQuery.aplicar_filtro_sql()` evalúa el filtro con un intérprete AST con lista blanca de nodos, eliminando el uso inseguro de `eval`.
 
 **Limitaciones conocidas:**
 - El conector **Tuya Smart Life** está incompleto (varios métodos de agrupación aún no implementados).
