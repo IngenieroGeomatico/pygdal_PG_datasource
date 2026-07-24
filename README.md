@@ -24,14 +24,17 @@ pygdal_PG_datasource/
 │   ├── Vector_conex.py             # Lectura, consulta y exportación vectorial (OGR)
 │   ├── Raster_conex.py             # Lectura y exportación ráster (GDAL)
 │   ├── sonoff_conex.py             # Conector IoT Sonoff/eWeLink → GeoJSON/OGR/SQLite
-│   ├── tuyaSmartLife_conex.py      # Conector IoT Tuya Smart Life (en desarrollo)
+│   ├── tuyaSmartLife_conex.py      # Conector IoT Tuya Smart Life + exportación GeoJSON/OGR
+│   ├── __init__.py                 # Convierte el directorio en paquete Python
 │   ├── lib_sonoff/
 │   │   ├── peticiones_sonoff.py    # Descubrimiento mDNS (zeroconf) de dispositivos
 │   │   └── cripto_sonoff.py        # Cifrado/descifrado AES-CBC del estado (eWeLink)
 │   └── lib_tuyaSmartLife/
 │       └── peticiones_TuyaSmartLife.py  # Descubrimiento local (tinytuya)
 ├── procesos/
+│   ├── __init__.py
 │   └── vector/
+│       ├── __init__.py
 │       ├── geoprocesos.py          # Geoprocesos OGR (buffers)
 │       └── tematicos.py            # Cálculos temáticos OGR (áreas)
 ├── tests/                          # Suite de tests (pytest)
@@ -39,7 +42,9 @@ pygdal_PG_datasource/
 │   ├── test_geojson_query.py       # Unit: consultas GeoJSON + seguridad filtro
 │   ├── test_pg_conex.py            # Unit: ConexPG (psycopg2 mockeado)
 │   ├── test_tuya_peticiones.py     # Unit: descubrimiento Tuya (tinytuya mockeado)
+│   ├── test_tuya_datos.py          # Unit: transformación datos Tuya
 │   ├── test_cripto_sonoff.py       # Unit: cifrado AES (requiere pycryptodome)
+│   ├── test_sonoff_sqlite.py       # Unit: Sonoff desde SQLite
 │   ├── test_vector_conex.py        # Unit: FuenteDatosVector (requiere GDAL)
 │   ├── test_procesos_vector.py     # Unit: buffers/áreas (requiere GDAL)
 │   └── integration/                # Tests de integración (recursos reales)
@@ -50,12 +55,13 @@ pygdal_PG_datasource/
 │       ├── test_pg_integracion.py
 │       ├── test_sonoff_integracion.py
 │       └── test_tuya_integracion.py
+├── pyproject.toml                  # Configuración del paquete Python
 ├── pytest.ini                      # Configuración de pytest
 ├── tmp/                            # Directorio temporal para exportaciones
 └── README.md
 ```
 
-> **Nota:** el código de la librería vive en `conex/` (no en un paquete `lib/`). Los ejemplos de importación de este README usan `conex.*`.
+> **Nota:** el código de la librería vive en `conex/` (no en un paquete `lib/`). Los ejemplos de importación de este README usan `conex.*`. El directorio `conex/` ya contiene `__init__.py` y puede importarse directamente.
 
 ---
 
@@ -94,19 +100,23 @@ pip install tinytuya
 
 ## Instalación
 
-Actualmente la librería se usa por copia directa del repositorio:
-
 ```bash
 git clone https://github.com/IngenieroGeomatico/pygdal_PG_datasource.git
 cd pygdal_PG_datasource
+pip install .
 ```
 
-No requiere `pip install`. Para usar los módulos desde tu proyecto, añade la raíz del repositorio al `sys.path` e importa desde el paquete `conex`:
+Para incluir dependencias opcionales (conectores IoT):
+
+```bash
+pip install .[sonoff]    # Sonoff/eWeLink
+pip install .[tuya]      # Tuya Smart Life
+pip install .[all]       # Todos los conectores IoT
+```
+
+El directorio `conex/` es un paquete Python (contiene `__init__.py`). Puedes importar los módulos directamente:
 
 ```python
-import sys
-sys.path.insert(0, '/ruta/a/pygdal_PG_datasource')
-
 from conex.PG_conex import ConexPG
 from conex.Vector_conex import FuenteDatosVector
 from conex.Raster_conex import FuenteDatosRaster
@@ -229,7 +239,13 @@ Exponen dispositivos IoT como capas geográficas. Requieren dependencias adicion
 
 `geojsonQuery` es un mini-motor de consultas sobre GeoJSON en memoria: `MRE_datos` (bbox), `aplicar_filtro_sql` (filtro SQL-like evaluado de forma **segura** mediante AST, sin `eval`), `ordenar_por`, `limit`, `offset`, `crear_ID`, `obtener_objeto_porID`, `obtenerAtributos`, `borrar_geometria`.
 
-**Tuya Smart Life** — `infoTuyaSmartLife` firma peticiones a Tuya Cloud (HMAC-SHA256) y descubre dispositivos locales con `tinytuya`. Módulo **en desarrollo**.
+**Tuya Smart Life** — `infoTuyaSmartLife` firma peticiones a Tuya Cloud (HMAC-SHA256), descubre dispositivos locales con `tinytuya`, y permite agruparlos por tipo, guardarlos en SQLite o exportarlos a JSON.
+
+| Clase                       | Salida / base                                                        |
+|-----------------------------|----------------------------------------------------------------------|
+| `FuenteDatosTuya`           | Exporta dispositivos a **GeoJSON** desde JSON (`+ geojsonQuery`).     |
+| `FuenteDatosTuya_SQLITE`    | Igual, leyendo desde un **SQLite** de dispositivos.                  |
+| `FuenteDatosTuya_OGR`       | Construye un datasource **OGR** en memoria (`+ FuenteDatosVector`).  |
 
 ---
 
@@ -387,10 +403,6 @@ La librería hace uso intensivo del sistema de archivos virtual de GDAL:
 - `infoSonoff.refreshAT()`/`logout()` usan `self.APP` (antes referenciaban un global inexistente).
 - Los constructores de los conectores IoT resuelven correctamente la ruta por defecto cuando no se pasa `ruta_json_params`.
 - `geojsonQuery.aplicar_filtro_sql()` evalúa el filtro con un intérprete AST con lista blanca de nodos, eliminando el uso inseguro de `eval`.
-
-**Limitaciones conocidas:**
-- El conector **Tuya Smart Life** está incompleto (varios métodos de agrupación aún no implementados).
-- El directorio `conex/` no contiene `__init__.py`, por lo que no es un paquete Python formal (los ejemplos ajustan `sys.path`).
 
 ---
 

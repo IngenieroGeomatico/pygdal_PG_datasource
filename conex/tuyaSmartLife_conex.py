@@ -32,6 +32,7 @@ else:
     _TINYTUYA_IMPORT_ERROR = None
 
 from .Vector_conex import FuenteDatosVector
+from .sonoff_conex import geojsonQuery, _asegurar_gdal
 
 
 def _asegurar_tinytuya():
@@ -301,27 +302,358 @@ class infoTuyaSmartLife:
     
 
     def get_state_devices(self, idDevice=None):
-        return
-    
-    def dividir_por_tipo_y_guardar(self):
-        return
+        if not self.jsonDevices:
+            raise Exception('Ejecuta get_devices() primero para obtener los dispositivos')
+        if idDevice:
+            if idDevice not in self.jsonDevices:
+                raise Exception(f"Dispositivo '{idDevice}' no encontrado")
+            result = self.call_v2_api(f"/v1.0/devices/{idDevice}/status")
+            self.jsonDevices[idDevice]['state'] = result.get('result', [])
+            return self.jsonDevices[idDevice]
+        else:
+            for device_id in self.jsonDevices:
+                result = self.call_v2_api(f"/v1.0/devices/{device_id}/status")
+                self.jsonDevices[device_id]['state'] = result.get('result', [])
+            return self.jsonDevices
 
-    def dividir_por_tipo(self):
-        return
-    
-    def dividir_por_tipo_sqlite(self):
-        return
+    def dividir_por_tipo(self, tipo=None):
+        if not self.jsonDevices:
+            raise Exception('Ejecuta get_devices() primero para obtener los dispositivos')
+        por_tipo = {}
+        for device_id, device_data in self.jsonDevices.items():
+            raw = device_data.get('tuyaSmartLife', {})
+            category = raw.get('category', 'UNKNOWN')
+            if tipo and category != tipo:
+                continue
+            if category not in por_tipo:
+                por_tipo[category] = {}
+            por_tipo[category][device_id] = device_data
+        return por_tipo
+
+    def dividir_por_tipo_y_guardar(self):
+        if not self.jsonDevices:
+            raise Exception('Ejecuta get_devices() primero para obtener los dispositivos')
+        if not self.ruta_json_devices:
+            dir_base = os.path.dirname(os.path.abspath(__file__))
+            self.ruta_json_devices = os.path.join(dir_base, 'lib_tuyaSmartLife/devices_tuyaSmartLife.json')
+        tipos = []
+        for categoria, dispositivos in self.dividir_por_tipo().items():
+            tipos.append(categoria)
+            nombre_archivo = self.ruta_json_devices.replace('devices', categoria)
+            with open(nombre_archivo, 'w', encoding='utf-8') as f:
+                json.dump(dispositivos, f, ensure_ascii=False, indent=2)
+        return tipos
+
+    def dividir_por_tipo_sqlite(self, tipo=None):
+        if not hasattr(self, 'ruta_SQLite_devices') or not self.ruta_SQLite_devices:
+            raise Exception("Define self.ruta_SQLite_devices con la ruta al archivo SQLite")
+        conn = sqlite3.connect(self.ruta_SQLite_devices)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tablas = [row[0] for row in cursor.fetchall()]
+        if not tablas:
+            conn.close()
+            raise Exception("El archivo SQLite no contiene tablas")
+        por_tipo = {}
+        for tabla in tablas:
+            if tipo and tabla != tipo:
+                continue
+            cursor.execute(f"SELECT * FROM {tabla};")
+            registros = cursor.fetchall()
+            columnas = [desc[0] for desc in cursor.description]
+            por_tipo[tabla] = [dict(zip(columnas, row)) for row in registros]
+        conn.close()
+        return por_tipo
 
     def obtener_tipos(self):
-        return
-    
-    def obtener_tipos_sqlite(self):
-        return
-    
-    def jsonDevices2SQLite(self):
-        return
-    
-    def actualizar_sqlite(self):
-        return
-    
+        if not self.jsonDevices:
+            raise Exception('Ejecuta get_devices() primero para obtener los dispositivos')
+        categorias = set()
+        for device_data in self.jsonDevices.values():
+            raw = device_data.get('tuyaSmartLife', {})
+            categorias.add(raw.get('category', 'UNKNOWN'))
+        return sorted(categorias)
 
+    def obtener_tipos_sqlite(self):
+        if not hasattr(self, 'ruta_SQLite_devices') or not self.ruta_SQLite_devices:
+            raise Exception("Define self.ruta_SQLite_devices con la ruta al archivo SQLite")
+        conn = sqlite3.connect(self.ruta_SQLite_devices)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tablas = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        if not tablas:
+            raise Exception("El archivo SQLite no contiene tablas")
+        return tablas
+
+    def jsonDevices2SQLite(self, ruta_SQLite_devices=None):
+        if not ruta_SQLite_devices:
+            raise Exception('Especifica la ruta del archivo SQLite')
+        if not self.jsonDevices:
+            raise Exception('Ejecuta get_devices() primero para obtener los dispositivos')
+        if os.path.exists(ruta_SQLite_devices):
+            os.remove(ruta_SQLite_devices)
+        conn = sqlite3.connect(ruta_SQLite_devices)
+        c = conn.cursor()
+        por_tipo = self.dividir_por_tipo()
+        for categoria, dispositivos in por_tipo.items():
+            c.execute(f'''
+                CREATE TABLE IF NOT EXISTS {categoria} (
+                    id TEXT PRIMARY KEY,
+                    extra TEXT,
+                    tuyaSmartLife TEXT,
+                    state TEXT
+                )
+            ''')
+            for device_id, device_data in dispositivos.items():
+                extra = json.dumps(device_data.get('extra', {}))
+                raw = json.dumps(device_data.get('tuyaSmartLife', {}))
+                state = json.dumps(device_data.get('state', []))
+                c.execute(f'''
+                    INSERT OR REPLACE INTO {categoria} (id, extra, tuyaSmartLife, state)
+                    VALUES (?, ?, ?, ?)
+                ''', (device_id, extra, raw, state))
+        conn.commit()
+        conn.close()
+        self.ruta_SQLite_devices = ruta_SQLite_devices
+        return ruta_SQLite_devices
+
+    def actualizar_sqlite(self):
+        if not self.ruta_SQLite_devices:
+            raise Exception('Ejecuta jsonDevices2SQLite() primero para crear el SQLite')
+        if not self.jsonDevices:
+            raise Exception('Ejecuta get_devices() primero para obtener los dispositivos')
+        conn = sqlite3.connect(self.ruta_SQLite_devices)
+        c = conn.cursor()
+        por_tipo = self.dividir_por_tipo()
+        for categoria, dispositivos in por_tipo.items():
+            for device_id, device_data in dispositivos.items():
+                extra = json.dumps(device_data.get('extra', {}))
+                raw = json.dumps(device_data.get('tuyaSmartLife', {}))
+                state = json.dumps(device_data.get('state', []))
+                c.execute(f'''
+                    INSERT OR REPLACE INTO {categoria} (id, extra, tuyaSmartLife, state)
+                    VALUES (?, ?, ?, ?)
+                ''', (device_id, extra, raw, state))
+        conn.commit()
+        conn.close()
+        return self.ruta_SQLite_devices
+
+
+class FuenteDatosTuya(infoTuyaSmartLife, geojsonQuery):
+    def __init__(self, ruta_json_params, ruta_json_devices):
+        infoTuyaSmartLife.__init__(self, ruta_json_params)
+        with open(ruta_json_devices, 'r', encoding='utf-8') as f:
+            try:
+                jsonDevices = json.load(f)
+            except json.JSONDecodeError:
+                raise Exception(f"json incorrecto: {ruta_json_devices}")
+        self.ruta_json_devices = ruta_json_devices
+        self.jsonDevices = jsonDevices
+        self.capas = self.obtener_tipos()
+        self.porTipo = self.dividir_por_tipo()
+
+    def leer(self, capa=None, datasetCompleto=False):
+        if datasetCompleto and capa is None:
+            self.porTipo = self.dividir_por_tipo()
+            return self.porTipo
+        elif capa is None:
+            capa = self.capas[0]
+            self.porTipo = self.dividir_por_tipo(tipo=capa)
+            return self.porTipo
+        else:
+            if isinstance(capa, int):
+                capa = self.capas[capa]
+            self.porTipo = self.dividir_por_tipo(tipo=capa)
+            return self.porTipo
+
+    def exportar_geojson(self, capa=None):
+        if not capa:
+            capa = next(iter(self.porTipo.keys()))
+        if isinstance(capa, int):
+            capa = self.capas[capa]
+        dispositivos = self.porTipo.get(capa, {})
+        features = []
+        for device_id, device in dispositivos.items():
+            extra = device.get('extra', {})
+            lon = extra.get('long')
+            lat = extra.get('lat')
+            if lon is None or lat is None:
+                continue
+            feature = {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [lon, lat]
+                },
+                "properties": {
+                    "id": device_id,
+                    "tuyaSmartLife": device.get('tuyaSmartLife', {}),
+                    "state": device.get('state', [])
+                }
+            }
+            features.append(feature)
+        geojson = {
+            "type": "FeatureCollection",
+            "features": features
+        }
+        self.geojson = geojson
+        return geojson
+
+
+class FuenteDatosTuya_SQLITE(infoTuyaSmartLife, geojsonQuery):
+    def __init__(self, ruta_json_params, ruta_SQLite_devices):
+        infoTuyaSmartLife.__init__(self, ruta_json_params)
+        self.ruta_SQLite_devices = ruta_SQLite_devices
+        if not self.ruta_SQLite_devices:
+            raise Exception('No se ha especificado la ruta del archivo SQLite')
+        self.capas = self.obtener_tipos_sqlite()
+        self.porTipo = {}
+
+    def leer(self, capa=None, datasetCompleto=False):
+        if not self.ruta_SQLite_devices:
+            raise Exception('No se ha especificado la ruta del archivo SQLite')
+        if not os.path.exists(self.ruta_SQLite_devices):
+            raise Exception(f'No se ha encontrado el archivo {self.ruta_SQLite_devices}')
+        conn = sqlite3.connect(self.ruta_SQLite_devices)
+        c = conn.cursor()
+        c.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tablas = c.fetchall()
+        self.capas = [tabla[0] for tabla in tablas]
+        self.porTipo = {tabla[0]: {} for tabla in tablas}
+        if capa is None:
+            for tabla in tablas:
+                if datasetCompleto:
+                    c.execute(f"SELECT * FROM {tabla[0]}")
+                    filas = c.fetchall()
+                    for fila in filas:
+                        self.porTipo[tabla[0]][fila[0]] = {
+                            "extra": json.loads(fila[1]),
+                            "tuyaSmartLife": json.loads(fila[2]),
+                            "state": json.loads(fila[3])
+                        }
+                else:
+                    c.execute(f"SELECT id FROM {tabla[0]}")
+                    ids = [fila[0] for fila in c.fetchall()]
+                    self.porTipo[tabla[0]] = ids
+        else:
+            if capa not in self.capas:
+                raise Exception(f'No existe la tabla {capa} en el archivo SQLite')
+            if datasetCompleto:
+                c.execute(f"SELECT * FROM {capa}")
+                filas = c.fetchall()
+                for fila in filas:
+                    self.porTipo[capa][fila[0]] = {
+                        "extra": json.loads(fila[1]),
+                        "tuyaSmartLife": json.loads(fila[2]),
+                        "state": json.loads(fila[3])
+                    }
+            else:
+                c.execute(f"SELECT id FROM {capa}")
+                ids = [fila[0] for fila in c.fetchall()]
+                self.porTipo[capa] = ids
+        conn.close()
+        return self.porTipo
+
+    def exportar_geojson(self, capa=None):
+        if not self.ruta_SQLite_devices:
+            raise Exception('No se ha especificado la ruta del archivo SQLite')
+        if not os.path.exists(self.ruta_SQLite_devices):
+            raise Exception(f'No se ha encontrado el archivo {self.ruta_SQLite_devices}')
+        conn = sqlite3.connect(self.ruta_SQLite_devices)
+        c = conn.cursor()
+        c.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tablas = c.fetchall()
+        self.capas = [tabla[0] for tabla in tablas]
+        if not capa:
+            capa = next(iter(self.capas))
+        if isinstance(capa, int):
+            capa = self.capas[capa]
+        if capa not in self.capas:
+            raise Exception(f'No existe la tabla {capa} en el archivo SQLite')
+        c.execute(f"SELECT * FROM {capa}")
+        filas = c.fetchall()
+        features = []
+        for fila in filas:
+            extra = json.loads(fila[1])
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [extra['long'], extra['lat']]
+                },
+                "properties": {
+                    "id": fila[0],
+                    "tuyaSmartLife": json.loads(fila[2]),
+                    "state": json.loads(fila[3])
+                }
+            })
+        geojson = {
+            "type": "FeatureCollection",
+            "features": features
+        }
+        conn.close()
+        self.geojson = geojson
+        return geojson
+
+
+class FuenteDatosTuya_OGR(infoTuyaSmartLife, FuenteDatosVector):
+    def __init__(self, ruta_json_params, ruta_SQLite_devices):
+        infoTuyaSmartLife.__init__(self, ruta_json_params)
+        FuenteDatosVector.__init__(self, ruta_SQLite_devices)
+        self.ruta_sqlite = ruta_SQLite_devices
+
+    def leer(self, capa=None, EPSG_Entrada=4326, datasetCompleto=False):
+        _asegurar_gdal()
+        ds = ogr.Open(self.ruta_sqlite)
+        if ds is None:
+            raise RuntimeError(f"No se pudo abrir la base de datos {self.ruta_sqlite}")
+        outdriver = ogr.GetDriverByName("MEMORY")
+        out_ds = outdriver.CreateDataSource("out_mem")
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(EPSG_Entrada)
+
+        def procesar_capa(in_layer, nombre_capa):
+            out_layer = out_ds.CreateLayer(nombre_capa, srs, ogr.wkbPoint)
+            in_defn = in_layer.GetLayerDefn()
+            for i in range(in_defn.GetFieldCount()):
+                out_layer.CreateField(in_defn.GetFieldDefn(i))
+            out_defn = out_layer.GetLayerDefn()
+            for in_feat in in_layer:
+                extra_raw = in_feat.GetField("extra")
+                extra_json = json.loads(extra_raw)
+                lon = float(extra_json.get("long"))
+                lat = float(extra_json.get("lat"))
+                if lon is None or lat is None:
+                    continue
+                geom = ogr.Geometry(ogr.wkbPoint)
+                geom.AddPoint(float(lon), float(lat))
+                out_feat = ogr.Feature(out_defn)
+                out_feat.SetGeometry(geom)
+                for i in range(out_defn.GetFieldCount()):
+                    out_feat.SetField(out_defn.GetFieldDefn(i).GetNameRef(), in_feat.GetField(i))
+                out_layer.CreateFeature(out_feat)
+                out_feat = None
+            in_layer.ResetReading()
+
+        if capa is not None:
+            try:
+                idx = int(capa)
+                in_layer = ds.GetLayerByIndex(idx)
+            except (ValueError, TypeError):
+                in_layer = ds.GetLayer(capa)
+            if in_layer is None:
+                raise Exception(f"No existe la capa '{capa}'")
+            procesar_capa(in_layer, in_layer.GetName())
+            self.multiLayers = False
+        elif datasetCompleto:
+            for i in range(ds.GetLayerCount()):
+                in_layer = ds.GetLayerByIndex(i)
+                procesar_capa(in_layer, in_layer.GetName())
+            self.multiLayers = True
+        else:
+            in_layer = ds.GetLayerByIndex(0)
+            procesar_capa(in_layer, in_layer.GetName())
+            self.multiLayers = False
+        self.datasource = out_ds
+        return out_ds
