@@ -1,6 +1,9 @@
 #  Importación de librerías
 import json
+import logging
 import psycopg2
+
+logger = logging.getLogger(__name__)
 
 """
 PG_conex.py
@@ -53,7 +56,7 @@ class ConexPG:
             try:
                 f = open(self.conexFile)
             except Exception as e:
-                print(e)
+                logger.error(e)
                 #  Si no existe, se crea el json de configuración
                 if "No such file or directory:" in str(e):
                     datajson = {
@@ -105,21 +108,17 @@ class ConexPG:
         }
 
         try:
-            # Establishing a connection to the database
+            # Estableciendo conexión a la base de datos
             connection = psycopg2.connect(**db_params)
         except (Exception, psycopg2.Error) as error:
-            print(f"Error connecting to the database: {error}")
-            raise Exception(f"Error connecting to the database: {error}")
+            logger.error(f"Error al conectar a la base de datos: {error}")
+            raise Exception(f"Error al conectar a la base de datos: {error}")
 
         if check:
             # Modo verificación: comprobamos que se puede abrir un cursor y cerramos.
             connection.close()
-            print('')
-            print('--------------------------------')
-            print("[v]  Database connection opened and closed.")
-            print('--------------------------------')
-            print('')
-            return "[v]  Database connection opened and closed."
+            logger.info("[v]  Conexión a la base de datos abierta y cerrada.")
+            return "[v]  Conexión a la base de datos abierta y cerrada."
 
         return connection
 

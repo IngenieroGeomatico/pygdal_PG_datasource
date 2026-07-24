@@ -7,11 +7,14 @@ import json
 import hmac
 import copy
 import base64
+import logging
 import sqlite3
 import hashlib
 import operator
 import requests
 import datetime
+
+logger = logging.getLogger(__name__)
 
 # Intenta importar GDAL/OGR y las dependencias IoT. El fallo se difiere hasta
 # que realmente se usen, de modo que importar este módulo (p. ej. para usar la
@@ -19,10 +22,9 @@ import datetime
 # GDAL/pycryptodome/zeroconf.
 try:
     from osgeo import ogr, osr, gdal
-    _GDAL_IMPORT_ERROR = None
-except Exception as _exc:  # pragma: no cover - depende del entorno
+except Exception:  # pragma: no cover - depende del entorno
+    # El error concreto se gestiona de forma centralizada en gdal_utils.
     ogr = osr = gdal = None
-    _GDAL_IMPORT_ERROR = _exc
 
 try:
     from .lib_sonoff.peticiones_sonoff import mDNS_todos, mDNS
@@ -41,14 +43,12 @@ else:
     _CRIPTO_IMPORT_ERROR = None
 
 from .Vector_conex import FuenteDatosVector
+from .gdal_utils import asegurar_gdal
 
 
 def _asegurar_gdal():
     """Lanza un error claro si GDAL/OGR no está disponible."""
-    if _GDAL_IMPORT_ERROR is not None:
-        raise ImportError(
-            "GDAL/OGR (paquete 'osgeo') no está disponible."
-        ) from _GDAL_IMPORT_ERROR
+    asegurar_gdal("los conectores geográficos Sonoff")
 
 
 def _asegurar_peticiones():
@@ -122,7 +122,7 @@ class infoSonoff:
             with open(ruta_json_params, 'w', encoding='utf-8') as f:
                 json.dump(templateJSON, f, ensure_ascii=False, indent=4)
             jsonParams = templateJSON
-            print(f'Archivo {ruta_json_params} creado con plantilla por defecto.')
+            logger.info(f'Archivo {ruta_json_params} creado con plantilla por defecto.')
         
         else:
             with open(ruta_json_params, 'r', encoding='utf-8') as f:
@@ -131,7 +131,7 @@ class infoSonoff:
                 except json.JSONDecodeError:
                     with open(ruta_json_params, 'w', encoding='utf-8') as f:
                         json.dump(templateJSON, f, ensure_ascii=False, indent=4)
-                    print(f'Archivo {ruta_json_params} creado con plantilla por defecto.')
+                    logger.info(f'Archivo {ruta_json_params} creado con plantilla por defecto.')
                     return
                 
         self.ruta_json_params = ruta_json_params
@@ -157,19 +157,19 @@ class infoSonoff:
     # Funciones
     def makeSign(self, key, message):
         """
-        Generate a signature for a message using a key.
+        Genera una firma para un mensaje usando una clave.
 
-        Parameters
+        Parámetros
         ----------
         key : str
-            The key used to generate the signature.
+            La clave usada para generar la firma.
         message : str
-            The message to be signed.
+            El mensaje a firmar.
 
-        Returns
-        -------
+        Devuelve
+        --------
         str
-            The base64 encoded signature.
+            La firma codificada en base64.
         """
         j = hmac.new(key.encode(), message.encode(), digestmod=hashlib.sha256)
         return (base64.b64encode(j.digest())).decode()
@@ -188,7 +188,7 @@ class infoSonoff:
 
             appid, appsecret = self.APP[app]
 
-            # ensure POST payload and Sign payload will be same
+            # asegurar que el payload POST y el payload de la firma sean iguales
             data = json.dumps(payload).encode()
             hex_dig = hmac.new(appsecret.encode(), data, hashlib.sha256).digest()
 
@@ -313,19 +313,19 @@ class infoSonoff:
                 with open(ruta_json_devices, 'w', encoding='utf-8') as f:
                     json.dump(templateJSON, f, ensure_ascii=False, indent=4)
                 jsonDevices = templateJSON
-                print(f'Archivo {ruta_json_devices} creado con plantilla por defecto.')
+                logger.info(f'Archivo {ruta_json_devices} creado con plantilla por defecto.')
 
         if not os.path.exists(ruta_json_devices):
             with open(ruta_json_devices, 'w', encoding='utf-8') as f:
                 json.dump(templateJSON, f, ensure_ascii=False, indent=4)
             jsonDevices = templateJSON
-            print(f'Archivo {ruta_json_devices} creado con plantilla por defecto.')
+            logger.info(f'Archivo {ruta_json_devices} creado con plantilla por defecto.')
 
         else:
             with open(ruta_json_devices, 'w', encoding='utf-8') as f:
                 json.dump(templateJSON, f, ensure_ascii=False, indent=4)
             jsonDevices = templateJSON
-            print(f'Archivo {ruta_json_devices} creado con plantilla por defecto.')
+            logger.info(f'Archivo {ruta_json_devices} creado con plantilla por defecto.')
                 
         self.ruta_json_devices = ruta_json_devices
         self.jsonDevices = jsonDevices
@@ -364,12 +364,12 @@ class infoSonoff:
                     self.jsonDevices[device]['state'] = data
                     self.jsonDevices[device]['extra']['datetime'] = datetime.datetime.now().isoformat()
                 else:
-                    print(f"Dispositivo {id} no encontrado en jsonDevices.")
+                    logger.warning(f"Dispositivo {id} no encontrado en jsonDevices.")
             
             # Escribe solo una vez al final
             with open(self.ruta_json_devices, 'w', encoding='utf-8') as f:
                 json.dump(self.jsonDevices, f, ensure_ascii=False, indent=4)
-            print(f'Archivo {self.ruta_json_devices} actualizado.')
+            logger.info(f'Archivo {self.ruta_json_devices} actualizado.')
         
         # Procesa solo un dispositivo
         else:
@@ -395,7 +395,7 @@ class infoSonoff:
             self.jsonDevices[idDevice]['extra']['datetime'] = datetime.datetime.now().isoformat()
             with open(self.ruta_json_devices, 'w', encoding='utf-8') as f:
                 json.dump(self.jsonDevices, f, ensure_ascii=False, indent=4)
-            print(f'Archivo {self.ruta_json_devices} actualizado.')
+            logger.info(f'Archivo {self.ruta_json_devices} actualizado.')
         
         return self.jsonDevices
     
@@ -892,13 +892,13 @@ class FuenteDatosSonoff(infoSonoff,geojsonQuery):
             try:
                 jsonParams = json.load(f)
             except json.JSONDecodeError:
-                raise Exception(f,"json incorrecto: {ruta_json_params}")
+                raise Exception(f"json incorrecto: {ruta_json_params}")
         
         with open(ruta_json_devices, 'r', encoding='utf-8') as f:
             try:
                 jsonDevices = json.load(f)
             except json.JSONDecodeError:
-                raise Exception(f,"json incorrecto: {ruta_json_devices}")
+                raise Exception(f"json incorrecto: {ruta_json_devices}")
 
         self.ruta_json_conex = ruta_json_params
         self.ruta_json_devices = ruta_json_devices
@@ -985,7 +985,7 @@ class FuenteDatosSonoff_SQLITE(infoSonoff,geojsonQuery):
             try:
                 jsonParams = json.load(f)
             except json.JSONDecodeError:
-                raise Exception(f,"json incorrecto: {ruta_json_params}")
+                raise Exception(f"json incorrecto: {ruta_json_params}")
         
         if not self.ruta_SQLite_devices:
             raise Exception('No se ha especificado la ruta del archivo SQLite')
