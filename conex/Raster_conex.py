@@ -5,26 +5,26 @@ import os
 import sys
 import uuid
 import json
+import logging
 import zipfile
+
+logger = logging.getLogger(__name__)
 
 # Intenta importar GDAL/OGR. El fallo se difiere hasta que realmente se use
 # GDAL (ver _asegurar_gdal), de modo que importar este módulo no aborte el
 # proceso cuando GDAL no está instalado.
 try:
     from osgeo import ogr, osr, gdal
-    _GDAL_IMPORT_ERROR = None
-except Exception as _exc:  # pragma: no cover - depende del entorno
+except Exception:  # pragma: no cover - depende del entorno
+    # El error concreto se gestiona de forma centralizada en gdal_utils.
     ogr = osr = gdal = None
-    _GDAL_IMPORT_ERROR = _exc
+
+from .gdal_utils import asegurar_gdal, normalizar_epsg, probar_gdal_ogr as _probar_gdal_ogr
 
 
 def _asegurar_gdal():
-    """Lanza un error claro si GDAL/OGR no está disponible."""
-    if _GDAL_IMPORT_ERROR is not None:
-        raise ImportError(
-            "GDAL/OGR (paquete 'osgeo') no está disponible. "
-            "Instálalo para usar FuenteDatosRaster."
-        ) from _GDAL_IMPORT_ERROR
+    """Lanza un error claro si GDAL/OGR no está disponible (para FuenteDatosRaster)."""
+    asegurar_gdal("FuenteDatosRaster")
 
 
 class FuenteDatosRaster:
@@ -51,76 +51,7 @@ class FuenteDatosRaster:
         Comprueba la instalación de GDAL/OGR y muestra los drivers vectoriales y ráster disponibles.
         Útil para diagnóstico del entorno.
         """
-        _asegurar_gdal()
-        version_num = int(gdal.VersionInfo('VERSION_NUM'))
-
-        print('Versión de GDAL/OGR: ', version_num)
-        print('----------')
-        print(' ')
-        if version_num < 1100000:
-            sys.exit('ERROR: Python bindings of GDAL 1.10 or later required')
-
-        # Listar drivers Vectoriales
-        cnt = ogr.GetDriverCount()
-        formatsList = []
-
-        for i in range(cnt):
-            driver = ogr.GetDriver(i)
-            driverName = driver.GetName()
-            if driverName not in formatsList:
-                formatsList.append(driverName)
-
-        formatsList.sort()
-
-        print(' ')
-        print('----------')
-        print('Drivers vectoriales')
-        print('----------')
-        print(' ')
-        for i in formatsList:
-            print(i)
-
-        # Listar drivers Ráster
-        cnt = gdal.GetDriverCount()
-        formatsList = []
-
-        for i in range(cnt):
-            driver = gdal.GetDriver(i)
-            driverName = driver.LongName
-            if driverName not in formatsList:
-                formatsList.append(driverName)
-
-        formatsList.sort()
-
-        print(' ')
-        print('----------')
-        print('DTodos los Drivers')
-        print('----------')
-        print(' ')
-        for i in formatsList:
-            print(i)
-        print(' ')
-
-        gdal.UseExceptions()
-
-        def gdal_error_handler(err_class, err_num, err_msg):
-            errtype = {
-                gdal.CE_None: 'None',
-                gdal.CE_Debug: 'Debug',
-                gdal.CE_Warning: 'Warning',
-                gdal.CE_Failure: 'Failure',
-                gdal.CE_Fatal: 'Fatal'
-            }
-            err_msg = err_msg.replace('\n', ' ')
-            err_class = errtype.get(err_class, 'None')
-            print('Error Number: %s' % (err_num))
-            print('Error Type: %s' % (err_class))
-            print('Error Message: %s' % (err_msg))
-
-        gdal.PushErrorHandler(gdal_error_handler)
-        gdal.Error(1, 2, 'test error')
-        gdal.PopErrorHandler()
-        gdal.DontUseExceptions()
+        return _probar_gdal_ogr()
 
     def __init__(self, dato):
         """
@@ -159,8 +90,7 @@ class FuenteDatosRaster:
             self.multiBand = False
 
         if EPSG_Entrada != None:
-            if "EPSG" in str(EPSG_Entrada):
-                EPSG_Entrada = EPSG_Entrada.split(":")[1]
+            EPSG_Entrada = normalizar_epsg(EPSG_Entrada)
 
         dato = self.dato
         if 'http' in dato.lower():
@@ -363,8 +293,7 @@ class FuenteDatosRaster:
             CreateOptionsArray=["WORLDFILE=YES"] 
 
         if EPSG_Salida != None:
-            if "EPSG" in str(EPSG_Salida):
-                EPSG_Salida = EPSG_Salida.split(":")[1]
+            EPSG_Salida = normalizar_epsg(EPSG_Salida)
 
             # Crear un sistema de referencia espacial
             srs = osr.SpatialReference()
@@ -415,7 +344,7 @@ class FuenteDatosRaster:
                                 zipf.write(full_path, os.path.basename(full_path))  # Agregar al ZIP
                                 os.remove(full_path)  # Eliminar el archivo después de añadirlo
                 
-                print(f"Archivo ZIP creado exitosamente en: {zip_output_path}")
+                logger.info(f"Archivo ZIP creado exitosamente en: {zip_output_path}")
                 outputPath = zip_output_path
             except Exception as e:
                 raise RuntimeError(f"Error al crear el archivo ZIP: {e}")
@@ -425,7 +354,7 @@ class FuenteDatosRaster:
         try:
             with open(outputPath, 'rb') as archivo:
                 blob = archivo.read()
-            print(f"Archivo ráster guardado exitosamente en: {outputPath}")
+            logger.info(f"Archivo ráster guardado exitosamente en: {outputPath}")
             os.remove(outputPath)
             return blob
         
@@ -468,7 +397,8 @@ class FuenteDatosRaster:
         # Proyección
         proj_wkt = self.datasource.GetProjection()
         srs = osr.SpatialReference()
-        srs.ImportFromWkt(proj_wkt) if proj_wkt else None
+        if proj_wkt:
+            srs.ImportFromWkt(proj_wkt)
 
         properties = {
             'bbox': [minx, miny, maxx, maxy],
@@ -648,8 +578,7 @@ class FuenteDatosRaster:
 
         # CRS del bbox
         src_srs = osr.SpatialReference()
-        if "EPSG" in str(EPSG_MRE):
-            EPSG_MRE = EPSG_MRE.split(":")[1]
+        EPSG_MRE = normalizar_epsg(EPSG_MRE)
         src_srs.ImportFromEPSG(int(EPSG_MRE))
 
         # Detectar si los CRS usan orden YX

@@ -8,20 +8,22 @@ import copy
 import uuid
 import time
 import base64
+import logging
 import sqlite3
 import hashlib
 import requests
 import datetime
 from urllib.parse import quote
 
+logger = logging.getLogger(__name__)
+
 # Import diferido de GDAL/OGR y del descubrimiento local (tinytuya), para que
 # importar este módulo no aborte el proceso cuando faltan esas dependencias.
 try:
     from osgeo import ogr, osr, gdal
-    _GDAL_IMPORT_ERROR = None
-except Exception as _exc:  # pragma: no cover - depende del entorno
+except Exception:  # pragma: no cover - depende del entorno
+    # El error concreto se gestiona de forma centralizada en gdal_utils.
     ogr = osr = gdal = None
-    _GDAL_IMPORT_ERROR = _exc
 
 try:
     from .lib_tuyaSmartLife.peticiones_TuyaSmartLife import find_all_devices
@@ -91,7 +93,7 @@ class infoTuyaSmartLife:
             with open(ruta_json_params, 'w', encoding='utf-8') as f:
                 json.dump(templateJSON, f, ensure_ascii=False, indent=4)
             jsonParams = templateJSON
-            print(f'Archivo {ruta_json_params} creado con plantilla por defecto.')
+            logger.info(f'Archivo {ruta_json_params} creado con plantilla por defecto.')
         
         else:
             with open(ruta_json_params, 'r', encoding='utf-8') as f:
@@ -100,7 +102,7 @@ class infoTuyaSmartLife:
                 except json.JSONDecodeError:
                     with open(ruta_json_params, 'w', encoding='utf-8') as f:
                         json.dump(templateJSON, f, ensure_ascii=False, indent=4)
-                    print(f'Archivo {ruta_json_params} creado con plantilla por defecto.')
+                    logger.info(f'Archivo {ruta_json_params} creado con plantilla por defecto.')
                     return
                 
         self.ruta_json_params = ruta_json_params
