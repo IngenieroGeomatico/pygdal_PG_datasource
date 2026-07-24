@@ -49,7 +49,7 @@ class TestConex2PG:
         connect.assert_called_once()
         connection.close.assert_called_once()
         assert isinstance(resultado, str)
-        assert "closed" in resultado.lower()
+        assert "cerrada" in resultado.lower()
 
     def test_check_false_devuelve_conexion_abierta(self, conexion_mock):
         pg, connection, cursor, connect = conexion_mock

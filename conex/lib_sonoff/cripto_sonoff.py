@@ -11,7 +11,7 @@ def pad(data: bytes, block_size: int) -> bytes:
 def unpad(data: bytes, block_size: int) -> bytes:
     padding_len = data[-1]
     if padding_len > block_size:
-        raise ValueError("Invalid padding length")
+        raise ValueError("Longitud de relleno no válida")
     return data[:-padding_len]
 
 def encrypt(payload: dict, devicekey: str) -> dict:

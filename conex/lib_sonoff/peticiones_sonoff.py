@@ -1,4 +1,4 @@
-"""HTTP requests utilities for Sonoff devices."""
+"""Utilidades de peticiones HTTP para dispositivos Sonoff."""
 import requests
 import time
 from zeroconf import ServiceBrowser, Zeroconf, ServiceListener
@@ -8,12 +8,12 @@ def sonoffPost(url: str, body: dict, header: dict) -> Any:
     """
     Realiza una petición POST y devuelve la respuesta en formato JSON.
 
-    Args:
+    Argumentos:
         url (str): URL de destino.
         body (dict): Cuerpo de la petición.
         header (dict): Cabeceras HTTP.
 
-    Returns:
+    Devuelve:
         Any: Respuesta decodificada en JSON.
     """
     time_out = 5
@@ -25,12 +25,12 @@ def mDNS(idDevice: str, timeout: int = 20, intentos: int = 3) -> Optional[Dict]:
     """
     Busca un dispositivo Sonoff por ID usando mDNS, repitiendo el escaneo varios intentos.
 
-    Args:
+    Argumentos:
         idDevice (str): ID del dispositivo a buscar.
         timeout (int): segundos máximos de espera por intento.
         intentos (int): número de repeticiones del escaneo.
 
-    Returns:
+    Devuelve:
         Optional[Dict]: Propiedades del dispositivo si se encuentra, None si no.
     """
     for i in range(intentos):
@@ -74,12 +74,12 @@ def mDNS_todos(devices: Dict, timeout: int = 20, intentos: int = 3) -> Dict[str,
     """
     Busca todos los dispositivos Sonoff en la red local usando mDNS, repitiendo el escaneo varios intentos.
 
-    Args:
+    Argumentos:
         devices (dict): json con los dispositivos.
         timeout (int): segundos máximos de espera por intento.
         intentos (int): número de repeticiones del escaneo.
 
-    Returns:
+    Devuelve:
         Dict[str, Dict]: Diccionario con las propiedades de cada dispositivo.
     """
     encontrados = {}
